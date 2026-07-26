@@ -81,6 +81,12 @@ export default function XianjianApp() {
     setLibraryItems(payload.items || []);
   }, []);
 
+  async function goHome() {
+    setLibraryView("meetings");
+    await loadLibrary("meetings");
+    setView("home");
+  }
+
   useEffect(() => {
     Promise.all([
       api<DemoPayload>("/api/demo"),
@@ -308,12 +314,12 @@ export default function XianjianApp() {
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <button className="brand" onClick={() => setView("home")} aria-label="返回首页">
+        <button className="brand" onClick={goHome} aria-label="返回首页">
           <span className="brand-mark">鉴</span>
           <span><strong>先鉴</strong><small>Conference intelligence</small></span>
         </button>
         <nav className="main-nav" aria-label="主导航">
-          <button className={view === "home" ? "active" : ""} onClick={() => setView("home")}>
+          <button className={view === "home" ? "active" : ""} onClick={goHome}>
             <span>⌂</span>今日判断
           </button>
           <button
@@ -370,13 +376,13 @@ export default function XianjianApp() {
               notify("任务已取消");
             }}
             onRetryRecovery={() => analysis.id && openAnalysis(analysis.id)}
-            onBack={() => setView("home")}
+            onBack={goHome}
           />
         )}
         {view === "detail" && analysis?.result && (
           <DetailView
             analysis={analysis}
-            onBack={() => setView("home")}
+            onBack={goHome}
             onState={(state) => updateMeetingState(analysis.meetingId, state)}
             onNoteSaved={() => notify("时间码笔记已保存")}
           />
