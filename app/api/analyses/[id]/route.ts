@@ -45,10 +45,11 @@ export async function GET(
         row.status = "completed";
         row.progressText = "已从 InfiniSynapse 恢复";
         row.resultJson = JSON.stringify(recovered.result);
-        await db
+        const saved = await db
           .prepare(`UPDATE analyses SET status = 'completed', progress_text = ?,
             result_json = ?, raw_messages_json = ?, workspace_json = ?,
-            updated_at = CURRENT_TIMESTAMP WHERE id = ? AND session_id = ?`)
+            updated_at = CURRENT_TIMESTAMP WHERE id = ? AND session_id = ?
+            AND status != 'completed'`)
           .bind(
             row.progressText,
             row.resultJson,
@@ -58,6 +59,44 @@ export async function GET(
             session.sessionId
           )
           .run();
+        if ((saved.meta?.changes || 0) > 0) {
+          const knowledgeStatements = [
+            ...recovered.result.newKnowledge.map((item) =>
+              db
+                .prepare(`INSERT INTO knowledge_items
+                  (id, session_id, meeting_id, analysis_id, topic, status, evidence)
+                  VALUES (?, ?, ?, ?, ?, 'new', ?)`)
+                .bind(
+                  crypto.randomUUID(),
+                  session.sessionId,
+                  row.meetingId,
+                  id,
+                  item.topic,
+                  item.evidence
+                )
+            ),
+            ...recovered.result.repeatedKnowledge.map((item) =>
+              db
+                .prepare(`INSERT INTO knowledge_items
+                  (id, session_id, meeting_id, analysis_id, topic, status, evidence)
+                  VALUES (?, ?, ?, ?, ?, 'repeated', ?)`)
+                .bind(
+                  crypto.randomUUID(),
+                  session.sessionId,
+                  row.meetingId,
+                  id,
+                  item.topic,
+                  item.evidence
+                )
+            ),
+          ];
+          if (knowledgeStatements.length) await db.batch(knowledgeStatements);
+          await db
+            .prepare(`UPDATE meetings SET transcript = '[已按隐私策略清理]',
+              updated_at = CURRENT_TIMESTAMP WHERE id = ? AND session_id = ?`)
+            .bind(row.meetingId, session.sessionId)
+            .run();
+        }
       }
     } catch {
       // Keep the durable local state and allow a later retry.

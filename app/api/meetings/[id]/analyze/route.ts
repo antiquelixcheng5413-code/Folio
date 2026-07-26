@@ -1,6 +1,6 @@
 import { getD1, getSession, sha256 } from "../../../../../lib/db";
-import { runInfiniAnalysis } from "../../../../../lib/infinisynapse";
-import type { LearningProfile, XianjianAnalysisResult } from "../../../../../lib/types";
+import { startInfiniTask } from "../../../../../lib/infinisynapse";
+import type { LearningProfile } from "../../../../../lib/types";
 
 type MeetingRow = {
   id: string;
@@ -112,7 +112,7 @@ export async function POST(
             WHERE id = ?`)
           .bind(analysisId)
           .run();
-        const run = await runInfiniAnalysis({
+        const run = await startInfiniTask({
           connId,
           transcript: meeting.transcript,
           meetingTitle: meeting.title,
@@ -127,59 +127,16 @@ export async function POST(
             sse(controller, "progress", { analysisId, ...progress });
           },
         });
-        const result = run.result as XianjianAnalysisResult;
         await db
-          .prepare(`UPDATE analyses SET task_id = ?, status = 'completed',
-            progress_text = '分析完成', result_json = ?, raw_messages_json = ?,
-            workspace_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
-          .bind(
-            run.taskId,
-            JSON.stringify(result),
-            JSON.stringify(run.messages).slice(0, 120_000),
-            JSON.stringify(run.workspace).slice(0, 80_000),
-            analysisId
-          )
+          .prepare(`UPDATE analyses SET task_id = ?, status = 'recovering',
+            progress_text = '真实任务运行中，可刷新恢复',
+            updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+          .bind(run.taskId, analysisId)
           .run();
-        const knowledgeStatements = [
-          ...result.newKnowledge.map((item) =>
-            db
-              .prepare(`INSERT INTO knowledge_items
-                (id, session_id, meeting_id, analysis_id, topic, status, evidence)
-                VALUES (?, ?, ?, ?, ?, 'new', ?)`)
-              .bind(
-                crypto.randomUUID(),
-                session.sessionId,
-                meeting.id,
-                analysisId,
-                item.topic,
-                item.evidence
-              )
-          ),
-          ...result.repeatedKnowledge.map((item) =>
-            db
-              .prepare(`INSERT INTO knowledge_items
-                (id, session_id, meeting_id, analysis_id, topic, status, evidence)
-                VALUES (?, ?, ?, ?, ?, 'repeated', ?)`)
-              .bind(
-                crypto.randomUUID(),
-                session.sessionId,
-                meeting.id,
-                analysisId,
-                item.topic,
-                item.evidence
-              )
-          ),
-        ];
-        if (knowledgeStatements.length) await db.batch(knowledgeStatements);
-        await db
-          .prepare(`UPDATE meetings SET transcript = '[已按隐私策略清理]',
-            updated_at = CURRENT_TIMESTAMP WHERE id = ? AND session_id = ?`)
-          .bind(meeting.id, session.sessionId)
-          .run();
-        sse(controller, "completed", {
+        sse(controller, "started", {
           analysisId,
           taskId: run.taskId,
-          result,
+          status: "recovering",
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : "分析失败";

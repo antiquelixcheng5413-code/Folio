@@ -96,12 +96,38 @@ export default function XianjianApp() {
       .finally(() => setLoading(false));
   }, [notify]);
 
+  async function pollAnalysis(analysisId: string) {
+    const deadline = Date.now() + 12 * 60 * 1000;
+    while (Date.now() < deadline) {
+      const payload = await api<{ analysis: Analysis }>(`/api/analyses/${analysisId}`);
+      setAnalysis(payload.analysis);
+      if (payload.analysis.result) {
+        setView("detail");
+        notify("真实分析已完成并自动归档。");
+        await loadLibrary("meetings");
+        return;
+      }
+      if (["failed", "cancelled"].includes(payload.analysis.status)) {
+        throw new Error(payload.analysis.errorMessage || "分析未完成");
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 8000));
+    }
+    setAnalysis((current) =>
+      current
+        ? {
+            ...current,
+            status: "recovering",
+            progressText: "任务仍在运行，可稍后从学习库继续恢复",
+          }
+        : current
+    );
+    notify("任务仍在 InfiniSynapse 运行，刷新后可继续恢复。");
+  }
+
   async function openAnalysis(analysisId: string) {
     setView("progress");
     try {
-      const payload = await api<{ analysis: Analysis }>(`/api/analyses/${analysisId}`);
-      setAnalysis(payload.analysis);
-      if (payload.analysis.result) setView("detail");
+      await pollAnalysis(analysisId);
     } catch (error) {
       notify(error instanceof Error ? error.message : "无法打开分析");
       setView("home");
@@ -174,6 +200,7 @@ export default function XianjianApp() {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      let recoveryId = "";
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
@@ -214,6 +241,19 @@ export default function XianjianApp() {
             );
           } else if (eventName === "deduplicated") {
             await openAnalysis(String(data.analysisId));
+          } else if (eventName === "started") {
+            recoveryId = String(data.analysisId);
+            setAnalysis((current) =>
+              current
+                ? {
+                    ...current,
+                    id: recoveryId,
+                    taskId: String(data.taskId),
+                    status: "recovering",
+                    progressText: "真实任务运行中，可刷新恢复",
+                  }
+                : current
+            );
           } else if (eventName === "completed") {
             setAnalysis((current) =>
               current
@@ -235,6 +275,7 @@ export default function XianjianApp() {
           }
         }
       }
+      if (recoveryId) await pollAnalysis(recoveryId);
     } catch (error) {
       const message = error instanceof Error ? error.message : "分析失败";
       setAnalysis((current) =>

@@ -347,6 +347,80 @@ export async function recoverInfiniTask(taskId: string, durationSeconds: number)
   return { result: null, taskInfo, messages, workspace: workspaceResult.workspace };
 }
 
+export async function startInfiniTask(options: RunOptions) {
+  const { apiKey, baseUrl } = config();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort("task start timeout"), 45_000);
+  let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  try {
+    await options.onProgress({ stage: "正在连接 InfiniSynapse Agent" });
+    const streamResponse = await fetch(
+      `${baseUrl}/api/ai/events?connId=${encodeURIComponent(options.connId)}`,
+      {
+        headers: headers(apiKey, "text/event-stream"),
+        signal: controller.signal,
+      }
+    );
+    if (!streamResponse.ok || !streamResponse.body) {
+      throw new Error(`SSE 连接失败（${streamResponse.status}）`);
+    }
+    reader = streamResponse.body.getReader();
+    await options.onProgress({ stage: "Agent 已连接，正在创建真实任务" });
+    const createResponse = await fetch(`${baseUrl}/api/ai/message`, {
+      method: "POST",
+      headers: headers(apiKey),
+      body: JSON.stringify({
+        type: "newTask",
+        text: buildPrompt(options),
+        connId: options.connId,
+        chatSettings: { mode: "act" },
+      }),
+      signal: controller.signal,
+    });
+    const createPayload = await createResponse.json().catch(() => null);
+    if (!createResponse.ok) {
+      throw new Error(
+        `创建任务失败（${createResponse.status}）：${
+          (createPayload as { message?: string } | null)?.message || "未知错误"
+        }`
+      );
+    }
+
+    let taskId = recursiveTaskId(createPayload) || "";
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (!taskId) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+      const blocks = buffer.split("\n\n");
+      buffer = blocks.pop() || "";
+      for (const block of blocks) {
+        const dataText = block
+          .split("\n")
+          .filter((line) => line.startsWith("data:"))
+          .map((line) => line.slice(5).trimStart())
+          .join("\n");
+        if (!dataText || dataText === "[DONE]") continue;
+        const payload = parseJsonCandidate(dataText) || dataText;
+        taskId = recursiveTaskId(payload) || "";
+        if (taskId) break;
+      }
+    }
+    if (!taskId) throw new Error("真实任务已发送，但未返回 taskId");
+    await options.onProgress({ stage: "真实任务已创建，等待结果恢复", taskId });
+    return { taskId, createPayload };
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error("创建真实任务超时，尚未获得可恢复的 taskId");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+    await reader?.cancel().catch(() => undefined);
+  }
+}
+
 export async function runInfiniAnalysis(options: RunOptions) {
   const { apiKey, baseUrl } = config();
   const controller = new AbortController();
