@@ -18,7 +18,10 @@ async function request(path, init = {}) {
     },
   });
   const setCookie = response.headers.get("set-cookie");
-  if (setCookie) cookie = setCookie.split(";")[0];
+  const sessionCookie = setCookie?.match(
+    /(?:^|,\s*)(xianjian_session=[^;,\s]+)/,
+  )?.[1];
+  if (sessionCookie) cookie = sessionCookie;
   return response;
 }
 
@@ -30,6 +33,26 @@ async function jsonRequest(path, init = {}) {
     `${path}: ${response.status} ${JSON.stringify(payload)}`,
   );
   return payload;
+}
+
+async function durableRequest(analysisId) {
+  let lastError;
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    try {
+      return await jsonRequest(`/api/analyses/${analysisId}`);
+    } catch (error) {
+      lastError = error;
+      console.log(
+        JSON.stringify({
+          event: "network-retry",
+          attempt,
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, attempt * 2000));
+    }
+  }
+  throw lastError;
 }
 
 function parseSseBlock(block) {
@@ -129,7 +152,7 @@ try {
 assert.ok(analysisId, "No analysisId received");
 assert.ok(taskId, "No real taskId received");
 
-let durable = await jsonRequest(`/api/analyses/${analysisId}`);
+let durable = await durableRequest(analysisId);
 const recoveryDeadline = Date.now() + timeoutMs;
 while (!durable.analysis.result && Date.now() < recoveryDeadline) {
   console.log(
@@ -140,7 +163,7 @@ while (!durable.analysis.result && Date.now() < recoveryDeadline) {
     }),
   );
   await new Promise((resolve) => setTimeout(resolve, 8000));
-  durable = await jsonRequest(`/api/analyses/${analysisId}`);
+  durable = await durableRequest(analysisId);
 }
 completed ||= {
   analysisId,

@@ -421,6 +421,55 @@ export async function startInfiniTask(options: RunOptions) {
   }
 }
 
+export async function requestInfiniRepair(taskId: string, connId: string) {
+  const { apiKey, baseUrl } = config();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort("repair timeout"), 45_000);
+  let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  try {
+    const streamResponse = await fetch(
+      `${baseUrl}/api/ai/events?connId=${encodeURIComponent(connId)}`,
+      {
+        headers: headers(apiKey, "text/event-stream"),
+        signal: controller.signal,
+      }
+    );
+    if (!streamResponse.ok || !streamResponse.body) {
+      throw new Error(`修复任务 SSE 连接失败（${streamResponse.status}）`);
+    }
+    reader = streamResponse.body.getReader();
+    const repairResponse = await fetch(`${baseUrl}/api/ai/message`, {
+      method: "POST",
+      headers: headers(apiKey),
+      body: JSON.stringify({
+        type: "askResponse",
+        taskId,
+        connId,
+        askResponse: "messageResponse",
+        text: "xianjian-result.json 不是合法 JSON。请修复并覆盖原文件：所有字符串内部的双引号必须转义；保持 xianjian.v1 字段不变；至少保留 3 个 startSeconds < endSeconds 的片段。最终回复只输出严格 JSON，不要 Markdown。",
+      }),
+      signal: controller.signal,
+    });
+    const payload = await repairResponse.json().catch(() => null);
+    if (!repairResponse.ok) {
+      throw new Error(
+        `请求 JSON 修复失败（${repairResponse.status}）：${
+          (payload as { message?: string } | null)?.message || "未知错误"
+        }`
+      );
+    }
+    return payload;
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error("请求 JSON 修复超时");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+    await reader?.cancel().catch(() => undefined);
+  }
+}
+
 export async function runInfiniAnalysis(options: RunOptions) {
   const { apiKey, baseUrl } = config();
   const controller = new AbortController();

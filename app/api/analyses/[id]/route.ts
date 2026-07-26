@@ -1,5 +1,8 @@
 import { getD1, getSession, json } from "../../../../lib/db";
-import { recoverInfiniTask } from "../../../../lib/infinisynapse";
+import {
+  recoverInfiniTask,
+  requestInfiniRepair,
+} from "../../../../lib/infinisynapse";
 
 type AnalysisRow = {
   id: string;
@@ -10,6 +13,7 @@ type AnalysisRow = {
   status: string;
   progressText: string;
   taskId: string | null;
+  connId: string;
   resultJson: string | null;
   errorMessage: string | null;
   createdAt: string;
@@ -26,6 +30,7 @@ export async function GET(
     .prepare(`SELECT a.id, a.meeting_id AS meetingId, m.title, m.source,
       m.duration_seconds AS durationSeconds, a.status,
       a.progress_text AS progressText, a.task_id AS taskId,
+      a.conn_id AS connId,
       a.result_json AS resultJson, a.error_message AS errorMessage,
       a.created_at AS createdAt
       FROM analyses a JOIN meetings m ON m.id = a.meeting_id
@@ -37,7 +42,7 @@ export async function GET(
   if (
     row.taskId &&
     !row.resultJson &&
-    ["running", "recovering"].includes(row.status)
+    ["running", "recovering", "repairing"].includes(row.status)
   ) {
     try {
       const recovered = await recoverInfiniTask(row.taskId, row.durationSeconds);
@@ -96,6 +101,21 @@ export async function GET(
               updated_at = CURRENT_TIMESTAMP WHERE id = ? AND session_id = ?`)
             .bind(row.meetingId, session.sessionId)
             .run();
+        }
+      } else if (
+        row.status === "recovering" &&
+        (recovered.taskInfo as { status?: string } | null)?.status === "completed"
+      ) {
+        row.status = "repairing";
+        row.progressText = "Agent 已完成，正在修复 JSON 结果";
+        const claimed = await db
+          .prepare(`UPDATE analyses SET status = 'repairing', progress_text = ?,
+            updated_at = CURRENT_TIMESTAMP WHERE id = ? AND session_id = ?
+            AND status = 'recovering'`)
+          .bind(row.progressText, id, session.sessionId)
+          .run();
+        if ((claimed.meta?.changes || 0) > 0) {
+          await requestInfiniRepair(row.taskId, row.connId);
         }
       }
     } catch {
