@@ -29,14 +29,44 @@ export async function POST(request: Request) {
     title?: string;
     source?: string;
     transcript?: string;
+    videoUrl?: string;
   };
-  const title = payload.title?.trim() || "";
-  const source = payload.source?.trim() || "用户导入";
-  const transcript = payload.transcript?.trim() || "";
+  const videoUrl = payload.videoUrl?.trim() || "";
+  let normalizedVideoUrl = "";
+  if (videoUrl) {
+    try {
+      const parsed = new URL(videoUrl);
+      if (!["http:", "https:"].includes(parsed.protocol)) throw new Error();
+      if (
+        /^(localhost|0\.0\.0\.0|127\.|10\.|192\.168\.|169\.254\.|\[?::1\]?$)/i.test(
+          parsed.hostname
+        )
+      ) {
+        throw new Error();
+      }
+      normalizedVideoUrl = parsed.toString();
+    } catch {
+      return json(
+        { error: "请提供可公开访问的 http(s) 视频链接" },
+        { status: 400 },
+        session.cookie
+      );
+    }
+  }
+  const videoHost = normalizedVideoUrl ? new URL(normalizedVideoUrl).hostname.replace(/^www\./, "") : "";
+  const title =
+    payload.title?.trim() ||
+    (videoHost ? `${videoHost} 视频` : "");
+  const source =
+    payload.source?.trim() ||
+    (videoHost ? `视频链接 · ${videoHost}` : "用户导入");
+  const transcript =
+    payload.transcript?.trim() ||
+    (normalizedVideoUrl ? `VIDEO_URL:${normalizedVideoUrl}` : "");
   if (!title) {
     return json({ error: "请输入会议标题" }, { status: 400 }, session.cookie);
   }
-  if (transcript.length < 500) {
+  if (!normalizedVideoUrl && transcript.length < 500) {
     return json(
       { error: "字幕内容太短，请至少提供 500 个字符" },
       { status: 400 },
@@ -52,8 +82,8 @@ export async function POST(request: Request) {
   }
   const id = crypto.randomUUID();
   const transcriptHash = await sha256(transcript);
-  const durationSeconds = parseTimecodeDuration(transcript);
-  if (!durationSeconds) {
+  const durationSeconds = normalizedVideoUrl ? 0 : parseTimecodeDuration(transcript);
+  if (!normalizedVideoUrl && !durationSeconds) {
     return json(
       { error: "没有识别到有效时间码，请使用 SRT、VTT 或带 HH:MM:SS 的文本" },
       { status: 400 },
@@ -75,7 +105,16 @@ export async function POST(request: Request) {
     )
     .run();
   return json(
-    { meeting: { id, title, source, durationSeconds, state: "archived" } },
+    {
+      meeting: {
+        id,
+        title,
+        source,
+        videoUrl: normalizedVideoUrl || null,
+        durationSeconds,
+        state: "archived",
+      },
+    },
     { status: 201 },
     session.cookie
   );

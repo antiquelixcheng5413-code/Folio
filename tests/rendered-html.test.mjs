@@ -13,7 +13,11 @@ test("build contains the Xianjian product and deployable worker", async () => {
   assert.match(page, /XianjianApp/);
   assert.match(layout, /先鉴｜先判断值不值得看/);
   assert.match(client, /InfiniSynapse Agent/);
-  assert.match(client, /学习库/);
+  assert.match(client, /视频链接/);
+  assert.match(client, /稍后看/);
+  assert.match(client, /历史记录/);
+  assert.match(client, /技能树/);
+  assert.match(client, /English/);
   assert.match(client, /时间码笔记/);
   assert.doesNotMatch(`${page}${layout}${client}`, /codex-preview|SkeletonPreview|Starter Project/);
 });

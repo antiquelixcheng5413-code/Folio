@@ -83,7 +83,19 @@ async function apiJson<T>(path: string, init: RequestInit = {}) {
 
 function buildPrompt(options: RunOptions) {
   const { profile, meetingTitle, transcript, durationSeconds } = options;
-  return `你是“先鉴”的会议内容价值分析 Agent。你必须基于用户画像逐段分析字幕，禁止编造字幕中不存在的内容。
+  const videoUrl = transcript.startsWith("VIDEO_URL:")
+    ? transcript.slice("VIDEO_URL:".length).trim()
+    : "";
+  const contentInstruction = videoUrl
+    ? `公开视频链接：${videoUrl}
+
+请先打开该公开视频页面，读取页面提供的字幕、章节、转录或其他可核验的时间码内容。若页面有“显示文字稿 / transcript / 字幕”入口，请使用它。仅根据实际读取到的内容分析，禁止凭标题编造。无法访问或没有任何可核验字幕/章节时，请明确返回错误，不要伪造片段。`
+    : `字幕估算总时长：${durationSeconds} 秒
+
+字幕开始：
+${transcript}
+字幕结束。`;
+  return `你是“先鉴”的会议内容价值分析 Agent。你必须基于用户画像逐段分析内容，禁止编造来源中不存在的信息。
 
 用户画像：
 - 方向：${profile.direction}
@@ -93,11 +105,11 @@ function buildPrompt(options: RunOptions) {
 - 内容偏好：${profile.preferences}
 
 会议标题：${meetingTitle}
-字幕估算总时长：${durationSeconds} 秒
+${contentInstruction}
 
 任务：
 1. 判断整场内容对该用户是值得看、选择性看，还是跳过。
-2. 提供至少 3 个、最多 7 个有效时间码片段；每段必须来自字幕时间码，startSeconds < endSeconds。
+2. 提供至少 3 个、最多 7 个有效时间码片段；每段必须来自可核验的字幕、章节或转录时间码，startSeconds < endSeconds。
 3. 每个片段标记 watch 或 skip，并说明对该用户的具体价值和字幕证据。
 4. 区分新增知识与用户已掌握/重复知识。
 5. 从匹配度、技术深度、推广含量、重复度、来源可靠度五个维度给出 0-100 分。
@@ -128,11 +140,7 @@ JSON 必须严格符合以下结构：
   }],
   "newKnowledge": [{"topic": "主题", "evidence": "依据"}],
   "repeatedKnowledge": [{"topic": "主题", "evidence": "依据"}]
-}
-
-字幕开始：
-${transcript}
-字幕结束。`;
+}`;
 }
 
 function recursiveTaskId(value: unknown): string | null {

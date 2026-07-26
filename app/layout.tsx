@@ -12,7 +12,7 @@ export async function generateMetadata(): Promise<Metadata> {
     requestHeaders.get("x-forwarded-proto") || (host.startsWith("localhost") ? "http" : "https");
   const origin = `${protocol}://${host}`;
   const description =
-    "面向知识工作者的个性化会议筛选工具：用真实 Agent 分析字幕，给出价值判决、时间码路线和可沉淀的学习笔记。";
+    "面向知识工作者的个性化会议筛选工具：只需提供公开视频链接，真实 Agent 会给出价值判断、时间码路线和可沉淀的学习笔记。";
   return {
     metadataBase: new URL(origin),
     title: "先鉴｜先判断值不值得看，再决定看什么",
