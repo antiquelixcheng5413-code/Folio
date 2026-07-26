@@ -100,7 +100,7 @@ export function getD1() {
   return binding();
 }
 
-function cookieValue(request: Request, name: string) {
+export function cookieValue(request: Request, name: string) {
   const cookie = request.headers.get("cookie") || "";
   const match = cookie.match(new RegExp(`(?:^|;\\s*)${name}=([^;]+)`));
   return match ? decodeURIComponent(match[1]) : null;

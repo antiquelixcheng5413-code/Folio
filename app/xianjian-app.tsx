@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { LearningProfile, XianjianAnalysisResult } from "../lib/types";
 
-type View = "home" | "later" | "history" | "skills" | "profile" | "progress" | "detail";
+type View = "home" | "later" | "history" | "skills" | "profile" | "settings" | "progress" | "detail";
 type Language = "zh" | "en";
 type Analysis = {
   id: string;
@@ -50,6 +50,7 @@ const copy = {
     history: "历史记录",
     skills: "技能树",
     profile: "个人画像",
+    settings: "设置",
     detail: "会议分析",
     search: "搜索会议、观点或讲者",
     add: "添加会议",
@@ -66,6 +67,7 @@ const copy = {
     history: "History",
     skills: "Skill tree",
     profile: "Learning profile",
+    settings: "Settings",
     detail: "Conference analysis",
     search: "Search talks, ideas or speakers",
     add: "Add conference",
@@ -94,6 +96,14 @@ function timecode(seconds = 0) {
 
 function verdictLabel(verdict: XianjianAnalysisResult["verdict"], language: Language) {
   return copy[language][verdict];
+}
+
+function currentDateLabel(language: Language) {
+  return new Intl.DateTimeFormat(language === "zh" ? "zh-CN" : "en-US", {
+    month: language === "zh" ? "long" : "short",
+    day: "numeric",
+    weekday: "long",
+  }).format(new Date()).toUpperCase();
 }
 
 async function api<T = Record<string, unknown>>(url: string, init?: RequestInit): Promise<T> {
@@ -128,6 +138,7 @@ export default function XianjianApp() {
   const [showAdd, setShowAdd] = useState(false);
   const [toast, setToast] = useState("");
   const [loading, setLoading] = useState(true);
+  const [canRestore, setCanRestore] = useState(false);
   const t = copy[language];
 
   const notify = useCallback((message: string) => {
@@ -151,12 +162,14 @@ export default function XianjianApp() {
       api<{ profile: LearningProfile }>("/api/profile"),
       api<{ items: MeetingItem[] }>("/api/library?view=meetings"),
       api<{ items: Record<string, unknown>[] }>("/api/library?view=knowledge"),
+      api<{ canRestore: boolean }>("/api/session/status"),
     ])
-      .then(([demoPayload, profilePayload, meetingPayload, knowledgePayload]) => {
+      .then(([demoPayload, profilePayload, meetingPayload, knowledgePayload, sessionPayload]) => {
         setDemo(demoPayload);
         setProfile(profilePayload.profile);
         setMeetings(meetingPayload.items || []);
         setKnowledge(knowledgePayload.items || []);
+        setCanRestore(sessionPayload.canRestore);
       })
       .catch((error) => notify(error instanceof Error ? error.message : "加载失败"))
       .finally(() => setLoading(false));
@@ -355,14 +368,17 @@ export default function XianjianApp() {
         </nav>
         <div className="side-note">
           <div className="mini-mascot"><img src="/mascot.png" alt="" /></div>
-          <strong>{language === "zh" ? "Mira 正在先看" : "Mira is previewing"}</strong>
-          <span>{analysis?.status === "running" ? analysis.title : "Agent Memory Summit"}</span>
-          <div className="progress"><i style={{ width: analysis?.status === "running" ? "68%" : "36%" }} /></div>
-          <small>{analysis?.status === "running" ? analysis.progressText : language === "zh" ? "等待下一场视频" : "Ready for the next video"}</small>
+          <strong>{analysis?.status === "running" ? (language === "zh" ? "Mira 正在先看" : "Mira is previewing") : (language === "zh" ? "暂无进行中的分析" : "No active analysis")}</strong>
+          <span>{analysis?.status === "running" ? analysis.title : language === "zh" ? "添加公开视频链接即可开始" : "Add a public video URL to begin"}</span>
+          <div className="progress"><i style={{ width: analysis?.status === "running" ? "68%" : "0%" }} /></div>
+          <small>{analysis?.status === "running" ? analysis.progressText : language === "zh" ? "这里不会显示虚构任务" : "No placeholder task is shown here"}</small>
         </div>
-        <button className="profile-chip" onClick={() => navigate("profile")}>
-          <span>NC</span><div><strong>Nan Cheng</strong><small>{language === "zh" ? "产品学习者" : "Product learner"}</small></div><em>•••</em>
-        </button>
+        <div className="profile-chip">
+          <button className="profile-identity-button" onClick={() => navigate("profile")} aria-label={t.profile}>
+            <span>NC</span><div><strong>Nan Cheng</strong><small>{language === "zh" ? "产品学习者" : "Product learner"}</small></div>
+          </button>
+          <button className="settings-trigger" onClick={() => navigate("settings")} aria-label={t.settings} title={t.settings}>•••</button>
+        </div>
       </aside>
 
       <main className="main">
@@ -424,6 +440,20 @@ export default function XianjianApp() {
             notify(language === "zh" ? "个人画像已保存" : "Profile saved");
           }} />
         )}
+        {view === "settings" && (
+          <SettingsView
+            language={language}
+            canRestore={canRestore}
+            onBlank={async () => {
+              await api("/api/session/blank", { method: "POST" });
+              window.location.assign("/");
+            }}
+            onRestore={async () => {
+              await api("/api/session/restore", { method: "POST" });
+              window.location.assign("/");
+            }}
+          />
+        )}
         {view === "progress" && analysis && (
           <ProgressView language={language} analysis={analysis} onBack={() => setView(previousView)} onRetry={() => analysis.id && openAnalysis(analysis.id)} />
         )}
@@ -463,14 +493,14 @@ function HomeView({
   return (
     <section className="page page-view">
       <div className="page-title home-title">
-        <div><span className="eyebrow">JULY 26 · SUNDAY</span><h1>{language === "zh" ? "早上好，Mira 已经替你先看了一轮" : "Good morning. Mira has previewed the latest talks."}</h1><p>{language === "zh" ? `${meetings.length} 场会议里，${worthCount} 场值得看，${skipCount} 场可以放心跳过。` : `${worthCount} worth watching and ${skipCount} safe to skip.`}</p></div>
+        <div><span className="eyebrow">{currentDateLabel(language)}</span><h1>{items.length ? (language === "zh" ? "Mira 已经替你先看了一轮" : "Mira has previewed the latest talks.") : (language === "zh" ? "这是一个干净的学习空间" : "This is a clean learning workspace.")}</h1><p>{language === "zh" ? `${meetings.length} 场会议里，${worthCount} 场值得看，${skipCount} 场可以放心跳过。` : `${meetings.length} talks, ${worthCount} worth watching and ${skipCount} safe to skip.`}</p></div>
         <div className="saved-pill"><span>{language === "zh" ? "本周省下" : "TIME SAVED"}</span><strong>{formatTime(savedTotal)}</strong></div>
       </div>
       <div className="home-grid">
         <article className="companion-card">
           <div className="companion-copy"><span className="eyebrow">YOUR VIEWING COMPANION</span><h2>Mira</h2><p>{language === "zh" ? "你的先看伙伴" : "Your viewing companion"}</p></div>
           <div className="mascot-stage"><div className="soft-orbit orbit-a" /><div className="soft-orbit orbit-b" /><img src="/mascot.png" alt="Mira" /></div>
-          <div className="watching-now"><div className="watching-line"><i /><strong>{language === "zh" ? "随时待命" : "Ready"}</strong><span>●</span></div><p>{language === "zh" ? "粘贴视频链接即可开始" : "Paste a video link to begin"}</p><div className="progress"><i style={{ width: "36%" }} /></div><small>{language === "zh" ? "公开视频 · 自动读取字幕与时间码" : "Public videos · captions and timestamps"}</small></div>
+          <div className="watching-now"><div className="watching-line"><i /><strong>{language === "zh" ? "随时待命" : "Ready"}</strong><span>●</span></div><p>{language === "zh" ? "粘贴视频链接即可开始" : "Paste a video link to begin"}</p><div className="progress"><i style={{ width: "0%" }} /></div><small>{language === "zh" ? "公开视频 · 自动读取字幕与时间码" : "Public videos · captions and timestamps"}</small></div>
         </article>
         <article className="feed-card">
           <div className="section-head"><div><h2>{language === "zh" ? "Mira 先替你看过了" : "Mira previewed these for you"}</h2><p>{language === "zh" ? "有用的留下，没必要看的也如实告诉你。" : "Keep the useful parts. Skip the rest."}</p></div><span className="count-badge">{language === "zh" ? `共 ${meetings.length} 场` : `${meetings.length} talks`}</span></div>
@@ -493,7 +523,7 @@ function HomeView({
           <button className="quick-card navy" onClick={() => onNavigate("later")}><span>{copy[language].later}</span><i>↗</i><strong>{laterCount} {language === "zh" ? "场" : ""}</strong><small>{language === "zh" ? "只留下值得投入的内容" : "Only the talks worth your time"}</small></button>
           <button className="quick-card" onClick={() => onNavigate("history")}><span>{copy[language].history}</span><i>↗</i><strong>{meetings.length} {language === "zh" ? "场" : ""}</strong><small>{language === "zh" ? "看过、跳过与留下" : "Watched, skipped and saved"}</small></button>
           <button className="quick-card" onClick={() => onNavigate("history")}><span>{language === "zh" ? "学习记录" : "Learning record"}</span><i>↗</i><strong>{knowledgeCount} {language === "zh" ? "个" : ""}</strong><small>{language === "zh" ? "自动沉淀知识更新" : "Knowledge updates"}</small></button>
-          <button className="quick-card book-quick" onClick={() => onNavigate("skills")}><span>{copy[language].skills}</span><i>↗</i><strong>9 {language === "zh" ? "项" : ""}</strong><small>{language === "zh" ? "3 项正在学习" : "3 in progress"}</small></button>
+          <button className="quick-card book-quick" onClick={() => onNavigate("skills")}><span>{copy[language].skills}</span><i>↗</i><strong>{language === "zh" ? "路径模板" : "Path template"}</strong><small>{language === "zh" ? `${knowledgeCount} 项真实知识更新` : `${knowledgeCount} real updates`}</small></button>
         </aside>
       </div>
     </section>
@@ -582,7 +612,8 @@ function SkillsView({ language, knowledge, onOpen }: { language: Language; knowl
       </div>
       <div className="skill-cards-head"><div><h2>{language === "zh" ? "最近更新" : "Recent updates"}</h2><p>{language === "zh" ? "来自你看过、跳过和收藏的内容" : "From watched, skipped and saved content"}</p></div><button>{knowledge.length} {language === "zh" ? "项知识更新" : "updates"}</button></div>
       <div className="skill-update-grid">
-        {(recent.length ? recent : [{ topic: "Agent Memory", evidence: "新增遗忘策略与记忆冲突两个知识点。" }, { topic: "Agent 评估", evidence: "从入门更新为进阶中。" }, { topic: "等待与信任设计", evidence: "已经能够用于当前项目。" }]).map((item, index) => <article key={`${String(item.topic)}-${index}`}><span className={`update-icon ${index === 0 ? "green" : index === 1 ? "navy" : "clay"}`}>{index === 0 ? "+12" : index === 1 ? "↑" : "✓"}</span><div><strong>{String(item.topic)}</strong><p>{String(item.evidence)}</p></div><time>{language === "zh" ? "最近" : "Recent"}</time></article>)}
+        {!recent.length && <div className="skill-update-empty">{language === "zh" ? "暂无真实知识更新。完成第一次视频分析后，这里会显示从结果中沉淀的主题与证据。" : "No real knowledge updates yet. Complete the first video analysis to populate this area with topics and evidence."}</div>}
+        {recent.map((item, index) => <article key={`${String(item.topic)}-${index}`}><span className={`update-icon ${index === 0 ? "green" : index === 1 ? "navy" : "clay"}`}>{index === 0 ? "+" : index === 1 ? "↑" : "✓"}</span><div><strong>{String(item.topic)}</strong><p>{String(item.evidence)}</p></div><time>{language === "zh" ? "最近" : "Recent"}</time></article>)}
       </div>
     </section>
   );
@@ -605,6 +636,83 @@ function ProfileView({ language, profile, onSave }: { language: Language; profil
           <article className="form-panel"><div className="panel-title"><div><h2>{language === "zh" ? "已掌握主题" : "Known topics"}</h2><p>{language === "zh" ? "重复出现时，Mira 会直接提醒你。" : "Mira flags repeated material."}</p></div></div><textarea className="profile-textarea compact" value={draft.knownTopics} onChange={(event) => setDraft({ ...draft, knownTopics: event.target.value })} /><div className="skill-cloud">{known.map((item) => <span key={item}>{item}<b>{language === "zh" ? "熟悉" : "Known"}</b></span>)}</div></article>
         </div>
       </div>
+    </section>
+  );
+}
+
+function SettingsView({
+  language,
+  canRestore,
+  onBlank,
+  onRestore,
+}: {
+  language: Language;
+  canRestore: boolean;
+  onBlank: () => Promise<void>;
+  onRestore: () => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const run = async (action: () => Promise<void>) => {
+    setBusy(true);
+    setError("");
+    try {
+      await action();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : (language === "zh" ? "切换失败，请稍后重试。" : "Switch failed. Please try again."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="page page-view settings-page">
+      <div className="page-title">
+        <div>
+          <span className="eyebrow">WORKSPACE SETTINGS</span>
+          <h1>{copy[language].settings}</h1>
+          <p>{language === "zh" ? "管理你的匿名学习空间，并核验哪些内容来自真实使用。" : "Manage your anonymous workspace and verify which content comes from real use."}</p>
+        </div>
+      </div>
+
+      <div className="settings-grid">
+        <article className="settings-panel">
+          <div className="settings-panel-head"><span className="settings-icon">◎</span><div><h2>{language === "zh" ? "数据说明" : "About your data"}</h2><p>{language === "zh" ? "页面不会把示例伪装成你的真实记录。" : "Examples are never presented as your real activity."}</p></div></div>
+          <div className="data-truth-list">
+            <div><i className="truth-dot live" /><div><strong>{language === "zh" ? "真实并持久化" : "Real and persisted"}</strong><p>{language === "zh" ? "会议、分析结果、taskId、时间码路线、稍后看状态、笔记、节省时间与知识更新，均来自你当前匿名会话并保存到 D1。" : "Talks, results, taskIds, routes, watch-later state, notes, saved time and knowledge updates come from this anonymous session and are stored in D1."}</p></div></div>
+            <div><i className="truth-dot template" /><div><strong>{language === "zh" ? "首次使用模板" : "First-use template"}</strong><p>{language === "zh" ? "个人画像的初始文字和技能树的路径结构是可编辑模板；技能树“最近更新”会在真实分析后使用你的知识更新。" : "Initial profile copy and the skill-path structure are editable templates. Recent skill updates use knowledge created by real analyses."}</p></div></div>
+            <div><i className="truth-dot empty" /><div><strong>{language === "zh" ? "空状态就是空状态" : "Empty means empty"}</strong><p>{language === "zh" ? "没有真实任务时，首页、历史记录、稍后看和侧栏不会显示虚构会议。" : "Without a real task, Home, History, Watch later and the sidebar show no fictional talks."}</p></div></div>
+          </div>
+        </article>
+
+        <article className="settings-panel verification-panel">
+          <div className="settings-panel-head"><span className="settings-icon">□</span><div><h2>{language === "zh" ? "空白核验空间" : "Blank verification workspace"}</h2><p>{language === "zh" ? "从零走一遍流程，同时保留你现在的空间。" : "Walk through the product from zero without losing your current workspace."}</p></div></div>
+          <ol className="verification-steps">
+            <li><span>1</span><p>{language === "zh" ? "进入空白空间，确认首页与各列表没有写死数据。" : "Enter a blank workspace and verify that lists contain no hardcoded records."}</p></li>
+            <li><span>2</span><p>{language === "zh" ? "点击“添加会议”，粘贴一个公开且带字幕的视频链接。" : "Choose Add conference and paste a public video URL with captions."}</p></li>
+            <li><span>3</span><p>{language === "zh" ? "完成真实分析后，核验 taskId、历史记录、技能更新与笔记。" : "After analysis, verify the taskId, History, skill updates and notes."}</p></li>
+          </ol>
+          <div className="workspace-action">
+            {error && <div className="settings-error">{error}</div>}
+            {canRestore ? (
+              <>
+                <div className="mode-badge"><i />{language === "zh" ? "当前正在空白核验空间" : "Currently in blank verification workspace"}</div>
+                <button className="primary-button" disabled={busy} onClick={() => run(onRestore)}>{language === "zh" ? "恢复原有空间" : "Restore original workspace"}</button>
+              </>
+            ) : (
+              <>
+                <p>{language === "zh" ? "这不会删除当前数据。浏览器会保存原空间入口，稍后可一键恢复。" : "This does not delete current data. Your browser keeps a one-click route back."}</p>
+                <button className="primary-button" disabled={busy} onClick={() => run(onBlank)}>{language === "zh" ? "进入空白核验空间" : "Enter blank workspace"}</button>
+              </>
+            )}
+          </div>
+        </article>
+      </div>
+
+      <article className="settings-panel settings-footnote">
+        <div><span className="eyebrow">PRIVACY</span><h2>{language === "zh" ? "匿名免登录" : "Anonymous, no sign-in"}</h2></div>
+        <p>{language === "zh" ? "当前空间通过 HttpOnly 会话 Cookie 隔离。先鉴不保存原视频；分析后只保留结构化结果和你主动写下的笔记。" : "This workspace is isolated by an HttpOnly session cookie. Xianjian does not store source video; only structured results and notes you write are retained."}</p>
+      </article>
     </section>
   );
 }

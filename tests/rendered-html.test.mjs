@@ -19,5 +19,8 @@ test("build contains the Xianjian product and deployable worker", async () => {
   assert.match(client, /技能树/);
   assert.match(client, /English/);
   assert.match(client, /时间码笔记/);
+  assert.match(client, /空白核验空间/);
+  assert.match(client, /真实并持久化/);
+  assert.match(client, /settings-trigger/);
   assert.doesNotMatch(`${page}${layout}${client}`, /codex-preview|SkeletonPreview|Starter Project/);
 });
