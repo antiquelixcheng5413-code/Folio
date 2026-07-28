@@ -1,4 +1,4 @@
-import { cookieValue, defaultProfile, getD1, getSession, json } from "../../../../lib/db";
+import { cookieValue, getD1, getSession, json } from "../../../../lib/db";
 
 const MONTH = 60 * 60 * 24 * 30;
 
@@ -19,20 +19,12 @@ export async function POST(request: Request) {
 
   const db = getD1();
   const nextSessionId = crypto.randomUUID();
-  const profile = defaultProfile();
   await db.batch([
     db.prepare("INSERT INTO sessions (id) VALUES (?)").bind(nextSessionId),
     db.prepare(`INSERT INTO profiles
       (session_id, direction, level, project, known_topics, preferences)
       VALUES (?, ?, ?, ?, ?, ?)`)
-      .bind(
-        nextSessionId,
-        profile.direction,
-        profile.level,
-        profile.project,
-        profile.knownTopics,
-        profile.preferences
-      ),
+      .bind(nextSessionId, "", "", "", "", ""),
   ]);
 
   const response = json({ ok: true, mode: "blank" });

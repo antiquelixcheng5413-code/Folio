@@ -1,0 +1,12 @@
+name = "xianjian"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+main = "./worker/index.ts"
+
+[triggers]
+crons = ["17 * * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "xianjian-d1"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"

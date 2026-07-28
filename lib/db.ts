@@ -2,11 +2,11 @@ import { env } from "cloudflare:workers";
 import type { LearningProfile } from "./types";
 
 const DEFAULT_PROFILE: LearningProfile = {
-  direction: "Agent 产品与交互设计",
-  level: "进阶入门",
-  project: "先鉴：帮助学习者判断会议值不值得看，并生成时间码路线",
-  knownTopics: "Prompt 基础、RAG 基础、用户研究",
-  preferences: "优先真实案例；减少概念复述；保留反对观点；自动识别推广内容",
+  direction: "",
+  level: "",
+  project: "",
+  knownTopics: "",
+  preferences: "",
 };
 
 let schemaReady: Promise<void> | null = null;
@@ -35,15 +35,26 @@ export async function ensureSchema() {
         preferences TEXT NOT NULL,
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
       )`),
+      db.prepare(`CREATE TABLE IF NOT EXISTS workspace_settings (
+        session_id TEXT PRIMARY KEY,
+        auto_create_note INTEGER NOT NULL DEFAULT 1,
+        auto_discover_videos INTEGER NOT NULL DEFAULT 0,
+        auto_analyze_discoveries INTEGER NOT NULL DEFAULT 0,
+        title_mode TEXT NOT NULL DEFAULT 'automatic',
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )`),
       db.prepare(`CREATE TABLE IF NOT EXISTS meetings (
         id TEXT PRIMARY KEY,
         session_id TEXT NOT NULL,
         title TEXT NOT NULL,
         source TEXT NOT NULL,
+        content_type TEXT NOT NULL DEFAULT 'video',
+        video_url TEXT,
+        title_is_manual INTEGER NOT NULL DEFAULT 0,
         transcript TEXT NOT NULL,
         transcript_hash TEXT NOT NULL,
         duration_seconds INTEGER NOT NULL DEFAULT 0,
-        state TEXT NOT NULL DEFAULT 'archived',
+        state TEXT NOT NULL DEFAULT 'pending',
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
       )`),
@@ -83,12 +94,56 @@ export async function ensureSchema() {
         evidence TEXT NOT NULL DEFAULT '',
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
       )`),
+      db.prepare(`CREATE TABLE IF NOT EXISTS discovery_candidates (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        keyword TEXT NOT NULL,
+        title TEXT NOT NULL,
+        video_url TEXT NOT NULL,
+        source TEXT NOT NULL,
+        snippet TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'recommended',
+        meeting_id TEXT,
+        analysis_id TEXT,
+        error_message TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )`),
       db.prepare("CREATE INDEX IF NOT EXISTS meetings_session_idx ON meetings(session_id, created_at DESC)"),
       db.prepare("CREATE INDEX IF NOT EXISTS analyses_session_idx ON analyses(session_id, created_at DESC)"),
       db.prepare("CREATE INDEX IF NOT EXISTS analyses_input_idx ON analyses(session_id, input_hash)"),
       db.prepare("CREATE INDEX IF NOT EXISTS notes_session_idx ON notes(session_id, created_at DESC)"),
       db.prepare("CREATE INDEX IF NOT EXISTS knowledge_session_idx ON knowledge_items(session_id, created_at DESC)"),
+      db.prepare("CREATE INDEX IF NOT EXISTS discovery_session_idx ON discovery_candidates(session_id, created_at DESC)"),
     ]);
+    try {
+      await db.prepare("ALTER TABLE meetings ADD COLUMN video_url TEXT").run();
+    } catch (error) {
+      if (!String(error).toLowerCase().includes("duplicate column")) throw error;
+    }
+    try {
+      await db.prepare("ALTER TABLE meetings ADD COLUMN content_type TEXT NOT NULL DEFAULT 'video'").run();
+    } catch (error) {
+      if (!String(error).toLowerCase().includes("duplicate column")) throw error;
+    }
+    try {
+      await db.prepare("ALTER TABLE meetings ADD COLUMN title_is_manual INTEGER NOT NULL DEFAULT 0").run();
+      // Existing titles may have been entered by the user, so migration must preserve them.
+      await db.prepare("UPDATE meetings SET title_is_manual = 1").run();
+    } catch (error) {
+      if (!String(error).toLowerCase().includes("duplicate column")) throw error;
+    }
+    for (const statement of [
+      "ALTER TABLE workspace_settings ADD COLUMN auto_discover_videos INTEGER NOT NULL DEFAULT 0",
+      "ALTER TABLE workspace_settings ADD COLUMN auto_analyze_discoveries INTEGER NOT NULL DEFAULT 0",
+      "ALTER TABLE workspace_settings ADD COLUMN title_mode TEXT NOT NULL DEFAULT 'automatic'",
+    ]) {
+      try {
+        await db.prepare(statement).run();
+      } catch (error) {
+        if (!String(error).toLowerCase().includes("duplicate column")) throw error;
+      }
+    }
   })().catch((error) => {
     schemaReady = null;
     throw error;
@@ -139,6 +194,11 @@ export async function getSession(request: Request) {
       )
       .run();
   }
+  await db
+    .prepare(`INSERT OR IGNORE INTO workspace_settings (session_id, auto_create_note)
+      VALUES (?, 1)`)
+    .bind(sessionId)
+    .run();
 
   return {
     sessionId,
@@ -177,4 +237,28 @@ export function parseTimecodeDuration(transcript: string) {
 
 export function defaultProfile() {
   return { ...DEFAULT_PROFILE };
+}
+
+export type WorkspaceSettings = {
+  autoCreateNote: boolean;
+  autoDiscoverVideos: boolean;
+  autoAnalyzeDiscoveries: boolean;
+  titleMode: "automatic" | "source";
+};
+
+export async function getWorkspaceSettings(sessionId: string): Promise<WorkspaceSettings> {
+  const row = await getD1()
+    .prepare(`SELECT auto_create_note AS autoCreateNote,
+      auto_discover_videos AS autoDiscoverVideos,
+      auto_analyze_discoveries AS autoAnalyzeDiscoveries,
+      title_mode AS titleMode
+      FROM workspace_settings WHERE session_id = ?`)
+    .bind(sessionId)
+    .first<{ autoCreateNote: number; autoDiscoverVideos: number; autoAnalyzeDiscoveries: number; titleMode: string }>();
+  return {
+    autoCreateNote: Number(row?.autoCreateNote ?? 1) === 1,
+    autoDiscoverVideos: Number(row?.autoDiscoverVideos ?? 0) === 1,
+    autoAnalyzeDiscoveries: Number(row?.autoAnalyzeDiscoveries ?? 0) === 1,
+    titleMode: row?.titleMode === "source" ? "source" : "automatic",
+  };
 }

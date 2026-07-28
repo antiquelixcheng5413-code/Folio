@@ -1,14 +1,20 @@
-import { getD1, getSession, json } from "../../../../lib/db";
+import { getD1, getSession, getWorkspaceSettings, json } from "../../../../lib/db";
 import {
   recoverInfiniTask,
   requestInfiniRepair,
 } from "../../../../lib/infinisynapse";
+import type { ContentType, XianjianAnalysisResult } from "../../../../lib/types";
 
 type AnalysisRow = {
   id: string;
   meetingId: string;
+  meetingState: string;
   title: string;
   source: string;
+  videoUrl: string | null;
+  contentUrl: string | null;
+  contentType: ContentType;
+  titleIsManual: number;
   durationSeconds: number;
   status: string;
   progressText: string;
@@ -19,6 +25,69 @@ type AnalysisRow = {
   createdAt: string;
 };
 
+function automaticNoteContent(result: XianjianAnalysisResult) {
+  const highlights = result.evidence.slice(0, 4).map((item) => `- ${item}`);
+  return [
+    result.summary,
+    "",
+    "精华内容",
+    ...(highlights.length ? highlights : ["- 这条内容的要点已整理在分析路线中。"]),
+    "",
+    `匹配度 ${result.signals.match}%：${result.signals.matchReason}`,
+    `内容含金量 ${result.signals.value}%：${result.signals.valueReason}`,
+  ].join("\n");
+}
+
+async function createAutomaticNote(
+  db: D1Database,
+  sessionId: string,
+  meetingId: string,
+  analysisId: string,
+  result: XianjianAnalysisResult
+) {
+  const settings = await getWorkspaceSettings(sessionId);
+  if (!settings.autoCreateNote) return;
+  const segmentId = `analysis-summary:${analysisId}`;
+  await db
+    .prepare(`INSERT INTO notes
+      (id, session_id, meeting_id, segment_id, timecode_seconds, content)
+      SELECT ?, ?, ?, ?, NULL, ?
+      WHERE NOT EXISTS (
+        SELECT 1 FROM notes WHERE session_id = ? AND meeting_id = ? AND segment_id = ?
+      )`)
+    .bind(
+      crypto.randomUUID(),
+      sessionId,
+      meetingId,
+      segmentId,
+      automaticNoteContent(result).slice(0, 4000),
+      sessionId,
+      meetingId,
+      segmentId
+    )
+    .run();
+}
+
+async function applyAutomaticTitle(
+  db: D1Database,
+  sessionId: string,
+  meetingId: string,
+  titleIsManual: number,
+  result: XianjianAnalysisResult
+) {
+  const generatedTitle = result.contentTitle?.trim();
+  if (titleIsManual || !generatedTitle) return null;
+  const settings = await getWorkspaceSettings(sessionId);
+  if (settings.titleMode !== "automatic") return null;
+  const title = generatedTitle.slice(0, 180);
+  await db
+    .prepare(`UPDATE meetings SET title = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND session_id = ? AND title_is_manual = 0`)
+    .bind(title, meetingId, sessionId)
+    .run();
+  return title;
+}
+
 export async function GET(
   request: Request,
   context: { params: Promise<{ id: string }> }
@@ -28,6 +97,8 @@ export async function GET(
   const db = getD1();
   const row = await db
     .prepare(`SELECT a.id, a.meeting_id AS meetingId, m.title, m.source,
+      m.content_type AS contentType, m.video_url AS contentUrl, m.video_url AS videoUrl,
+      m.state AS meetingState, m.title_is_manual AS titleIsManual,
       m.duration_seconds AS durationSeconds, a.status,
       a.progress_text AS progressText, a.task_id AS taskId,
       a.conn_id AS connId,
@@ -45,12 +116,12 @@ export async function GET(
     ["running", "recovering", "repairing"].includes(row.status)
   ) {
     try {
-      const recovered = await recoverInfiniTask(row.taskId, row.durationSeconds);
+      const recovered = await recoverInfiniTask(row.taskId, row.durationSeconds, row.contentType);
       if (recovered.result) {
         row.status = "completed";
         row.progressText = "已从 InfiniSynapse 恢复";
         row.resultJson = JSON.stringify(recovered.result);
-        const saved = await db
+        await db
           .prepare(`UPDATE analyses SET status = 'completed', progress_text = ?,
             result_json = ?, raw_messages_json = ?, workspace_json = ?,
             updated_at = CURRENT_TIMESTAMP WHERE id = ? AND session_id = ?
@@ -64,44 +135,24 @@ export async function GET(
             session.sessionId
           )
           .run();
-        if ((saved.meta?.changes || 0) > 0) {
-          const knowledgeStatements = [
-            ...recovered.result.newKnowledge.map((item) =>
-              db
-                .prepare(`INSERT INTO knowledge_items
-                  (id, session_id, meeting_id, analysis_id, topic, status, evidence)
-                  VALUES (?, ?, ?, ?, ?, 'new', ?)`)
-                .bind(
-                  crypto.randomUUID(),
-                  session.sessionId,
-                  row.meetingId,
-                  id,
-                  item.topic,
-                  item.evidence
-                )
-            ),
-            ...recovered.result.repeatedKnowledge.map((item) =>
-              db
-                .prepare(`INSERT INTO knowledge_items
-                  (id, session_id, meeting_id, analysis_id, topic, status, evidence)
-                  VALUES (?, ?, ?, ?, ?, 'repeated', ?)`)
-                .bind(
-                  crypto.randomUUID(),
-                  session.sessionId,
-                  row.meetingId,
-                  id,
-                  item.topic,
-                  item.evidence
-                )
-            ),
-          ];
-          if (knowledgeStatements.length) await db.batch(knowledgeStatements);
-          await db
-            .prepare(`UPDATE meetings SET transcript = '[已按隐私策略清理]',
-              updated_at = CURRENT_TIMESTAMP WHERE id = ? AND session_id = ?`)
-            .bind(row.meetingId, session.sessionId)
-            .run();
+        try {
+          await createAutomaticNote(db, session.sessionId, row.meetingId, id, recovered.result);
+        } catch {
+          // A note should never prevent an otherwise completed analysis from opening.
         }
+        const generatedTitle = await applyAutomaticTitle(
+          db,
+          session.sessionId,
+          row.meetingId,
+          row.titleIsManual,
+          recovered.result
+        );
+        if (generatedTitle) row.title = generatedTitle;
+        await db
+          .prepare(`UPDATE meetings SET transcript = '[已按隐私策略清理]',
+            updated_at = CURRENT_TIMESTAMP WHERE id = ? AND session_id = ?`)
+          .bind(row.meetingId, session.sessionId)
+          .run();
       } else if (
         row.status === "recovering" &&
         (recovered.taskInfo as { status?: string } | null)?.status === "completed"
@@ -115,7 +166,7 @@ export async function GET(
           .bind(row.progressText, id, session.sessionId)
           .run();
         if ((claimed.meta?.changes || 0) > 0) {
-          await requestInfiniRepair(row.taskId, row.connId);
+          await requestInfiniRepair(row.taskId, row.connId, row.contentType);
         }
       }
     } catch {

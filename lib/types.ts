@@ -1,5 +1,12 @@
 export type Verdict = "worth" | "selective" | "skip";
 export type SegmentDecision = "watch" | "skip";
+export type ContentType = "video" | "article" | "paper";
+
+export interface ContentLocator {
+  heading?: string;
+  quote?: string;
+  pageNumber?: number;
+}
 
 export interface AnalysisSegment {
   id: string;
@@ -10,6 +17,7 @@ export interface AnalysisSegment {
   value: string;
   evidence: string;
   tags: string[];
+  locator?: ContentLocator;
 }
 
 export interface KnowledgeItem {
@@ -19,11 +27,15 @@ export interface KnowledgeItem {
 
 export interface XianjianAnalysisResult {
   schemaVersion: "xianjian.v1";
+  contentTitle?: string;
   verdict: Verdict;
   summary: string;
   evidence: string[];
   signals: {
     match: number;
+    matchReason: string;
+    value: number;
+    valueReason: string;
     depth: number;
     promotion: number;
     repetition: number;

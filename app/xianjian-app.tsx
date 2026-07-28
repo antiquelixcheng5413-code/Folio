@@ -1,15 +1,20 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import type { LearningProfile, XianjianAnalysisResult } from "../lib/types";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ContentType, LearningProfile, XianjianAnalysisResult } from "../lib/types";
+import { ConnectInfiniModal } from "./connect-infini-modal";
 
-type View = "home" | "later" | "history" | "skills" | "profile" | "settings" | "progress" | "detail";
+type View = "home" | "tasks" | "later" | "history" | "notes" | "skills" | "settings" | "progress" | "detail";
 type Language = "zh" | "en";
 type Analysis = {
   id: string;
   meetingId: string;
+  meetingState: string;
   title: string;
   source: string;
+  contentType: ContentType;
+  contentUrl?: string | null;
+  videoUrl?: string | null;
   status: string;
   progressText: string;
   taskId: string | null;
@@ -20,62 +25,181 @@ type MeetingItem = {
   id: string;
   title: string;
   source: string;
+  contentType?: ContentType;
+  contentUrl?: string | null;
+  videoUrl?: string | null;
   durationSeconds: number;
   state: string;
   createdAt: string;
   analysisId?: string;
   status?: string;
+  progressText?: string;
   taskId?: string;
   noteCount?: number;
   result?: XianjianAnalysisResult | null;
+};
+type NoteItem = {
+  id: string;
+  meetingId: string;
+  segmentId?: string | null;
+  timecodeSeconds?: number | null;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+  title: string;
 };
 type DemoPayload = {
   demo: { title: string; source: string; transcript: string };
   profiles: Array<{ id: string; name: string; profile: LearningProfile }>;
 };
-
-const EMPTY_PROFILE: LearningProfile = {
-  direction: "",
-  level: "",
-  project: "",
-  knownTopics: "",
-  preferences: "",
+type WorkspaceSettings = {
+  autoCreateNote: boolean;
+  autoDiscoverVideos: boolean;
+  autoAnalyzeDiscoveries: boolean;
+  titleMode: "automatic" | "source";
 };
+type DiscoveryItem = {
+  id: string;
+  keyword: string;
+  title: string;
+  videoUrl: string;
+  source: string;
+  snippet: string;
+  status: string;
+  meetingId?: string | null;
+  analysisId?: string | null;
+  analysisStatus?: string | null;
+  errorMessage?: string | null;
+  result?: XianjianAnalysisResult | null;
+};
+
+const SHELF_STATES = new Set(["shelved", "later", "completed"]);
+const ACTIVE_ANALYSIS_STATUSES = new Set(["queued", "running", "recovering", "repairing"]);
+
+function isOnShelf(state?: string) {
+  return SHELF_STATES.has(state || "");
+}
+
+function isAnalysisActive(status?: string) {
+  return ACTIVE_ANALYSIS_STATUSES.has(status || "");
+}
+
+function analysisPreview(item: MeetingItem, language: Language): Analysis {
+  const progressText = item.progressText || (item.status === "queued"
+    ? (language === "zh" ? "等待开始分析" : "Waiting to start")
+    : item.status === "repairing"
+      ? (language === "zh" ? "Agent 已完成，正在整理分析结果" : "Agent finished; preparing the result")
+      : (language === "zh" ? "真实任务运行中，可刷新恢复" : "The task is running and survives refresh"));
+  return {
+    id: item.analysisId || "",
+    meetingId: item.id,
+    meetingState: item.state,
+    title: item.title,
+    source: item.source,
+    contentType: item.contentType || "video",
+    contentUrl: item.contentUrl || item.videoUrl || null,
+    videoUrl: item.videoUrl || null,
+    status: item.status || "recovering",
+    progressText,
+    taskId: item.taskId || null,
+    result: item.result || null,
+  };
+}
+
+function replaceAnalysisUrl(analysisId?: string) {
+  const url = new URL(window.location.href);
+  if (analysisId) url.searchParams.set("analysis", analysisId);
+  else url.searchParams.delete("analysis");
+  window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
+function contentValueScore(result: XianjianAnalysisResult) {
+  if (Number.isFinite(result.signals.value)) return result.signals.value;
+  return Math.round(
+    result.signals.depth * 0.35 +
+      result.signals.sourceReliability * 0.35 +
+      (100 - result.signals.promotion) * 0.15 +
+      (100 - result.signals.repetition) * 0.15
+  );
+}
+
+function scoreBand(score: number, language: Language) {
+  if (score >= 75) return language === "zh" ? "高" : "High";
+  if (score >= 45) return language === "zh" ? "中" : "Medium";
+  return language === "zh" ? "低" : "Low";
+}
+
+function playbackUrl(videoUrl: string, seconds: number) {
+  const url = new URL(videoUrl);
+  const host = url.hostname.replace(/^www\./, "").toLowerCase();
+  const start = String(Math.max(0, Math.floor(seconds)));
+  if (host === "youtube.com" || host === "m.youtube.com" || host === "youtu.be") {
+    url.searchParams.set("t", start);
+  } else if (host.endsWith("bilibili.com")) {
+    url.searchParams.set("t", start);
+  } else if (host === "vimeo.com" || host.endsWith("vimeo.com")) {
+    url.hash = `t=${start}s`;
+  } else {
+    url.hash = `t=${start}`;
+  }
+  return url.toString();
+}
+
+function contentTypeLabel(contentType: ContentType, language: Language) {
+  if (language === "zh") return contentType === "paper" ? "论文" : contentType === "article" ? "文章" : "视频";
+  return contentType === "paper" ? "Paper" : contentType === "article" ? "Article" : "Video";
+}
+
+function contentLocatorUrl(contentUrl: string, segment: XianjianAnalysisResult["segments"][number]) {
+  try {
+    const url = new URL(contentUrl);
+    if (segment.locator?.pageNumber) {
+      url.hash = `page=${segment.locator.pageNumber}`;
+    } else if (segment.locator?.quote) {
+      url.hash = `:~:text=${encodeURIComponent(segment.locator.quote.slice(0, 180))}`;
+    }
+    return url.toString();
+  } catch {
+    return contentUrl;
+  }
+}
 
 const copy = {
   zh: {
     workspace: "今天",
     home: "首页",
-    later: "稍后看",
+    tasks: "运行中",
+    later: "书架",
     history: "历史记录",
+    notes: "笔记",
     skills: "技能树",
-    profile: "个人画像",
     settings: "设置",
-    detail: "会议分析",
-    search: "搜索会议、观点或讲者",
-    add: "添加会议",
+    detail: "内容分析",
+    search: "搜索视频、文章、论文或观点",
+    add: "添加内容",
     worth: "值得看",
     selective: "选择性看",
     skip: "可以跳过",
     open: "看路线",
-    noItems: "这里还没有记录。添加一个视频链接，Mira 会替你先看。",
+    noItems: "这里还没有记录。添加视频、文章或论文链接，Mira 会替你先读。",
   },
   en: {
     workspace: "Workspace",
     home: "Home",
-    later: "Watch later",
+    tasks: "Running",
+    later: "Library",
     history: "History",
+    notes: "Notes",
     skills: "Skill tree",
-    profile: "Learning profile",
     settings: "Settings",
-    detail: "Conference analysis",
-    search: "Search talks, ideas or speakers",
-    add: "Add conference",
+    detail: "Content analysis",
+    search: "Search videos, articles, papers or ideas",
+    add: "Add content",
     worth: "Worth watching",
     selective: "Watch selectively",
     skip: "Safe to skip",
     open: "View route",
-    noItems: "No records yet. Add a video link and Mira will preview it for you.",
+    noItems: "No records yet. Add a video, article or paper for Mira to review.",
   },
 } as const;
 
@@ -113,13 +237,14 @@ async function api<T = Record<string, unknown>>(url: string, init?: RequestInit)
   return payload;
 }
 
-function NavIcon({ kind }: { kind: "home" | "later" | "history" | "skills" | "profile" }) {
+function NavIcon({ kind }: { kind: "home" | "tasks" | "later" | "history" | "notes" | "skills" }) {
   const paths = {
     home: <><path d="M4 10.8 12 4l8 6.8V20H4z" /><path d="M9 20v-6h6v6" /></>,
+    tasks: <><circle cx="12" cy="12" r="8" /><path d="M12 7v5l3 2" /></>,
     later: <path d="M6 3h12v18l-6-4-6 4z" />,
     history: <><path d="M4 12a8 8 0 1 0 2.3-5.7L4 8.6" /><path d="M4 4v4.6h4.6M12 8v5l3 2" /></>,
+    notes: <><path d="M5 3h11l3 3v15H5z" /><path d="M9 9h6M9 13h6M9 17h4" /></>,
     skills: <><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z" /><path d="M8 4v16M12 8h4" /></>,
-    profile: <><circle cx="12" cy="8" r="4" /><path d="M4.5 21a7.5 7.5 0 0 1 15 0" /></>,
   };
   return <svg viewBox="0 0 24 24" aria-hidden="true">{paths[kind]}</svg>;
 }
@@ -132,13 +257,24 @@ export default function XianjianApp() {
   const [query, setQuery] = useState("");
   const [meetings, setMeetings] = useState<MeetingItem[]>([]);
   const [knowledge, setKnowledge] = useState<Record<string, unknown>[]>([]);
+  const [notes, setNotes] = useState<NoteItem[]>([]);
+  const [workspaceSettings, setWorkspaceSettings] = useState<WorkspaceSettings>({
+    autoCreateNote: true,
+    autoDiscoverVideos: false,
+    autoAnalyzeDiscoveries: false,
+    titleMode: "automatic",
+  });
+  const [discoveries, setDiscoveries] = useState<DiscoveryItem[]>([]);
   const [demo, setDemo] = useState<DemoPayload | null>(null);
-  const [profile, setProfile] = useState<LearningProfile>(EMPTY_PROFILE);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [showAdd, setShowAdd] = useState(false);
+  const [showConnect, setShowConnect] = useState(false);
+  const [taskListOpen, setTaskListOpen] = useState(false);
   const [toast, setToast] = useState("");
   const [loading, setLoading] = useState(true);
   const [canRestore, setCanRestore] = useState(false);
+  const restoredOnLoad = useRef(false);
+  const analysisRequestVersion = useRef(0);
   const t = copy[language];
 
   const notify = useCallback((message: string) => {
@@ -156,40 +292,75 @@ export default function XianjianApp() {
     setKnowledge(payload.items || []);
   }, []);
 
+  const loadNotes = useCallback(async () => {
+    const payload = await api<{ items: NoteItem[] }>("/api/library?view=notes");
+    setNotes(payload.items || []);
+  }, []);
+
+  const loadDiscoveries = useCallback(async () => {
+    const payload = await api<{ items: DiscoveryItem[] }>("/api/discoveries");
+    setDiscoveries(payload.items || []);
+  }, []);
+
   useEffect(() => {
+    if (restoredOnLoad.current) return;
+    restoredOnLoad.current = true;
     Promise.all([
       api<DemoPayload>("/api/demo"),
-      api<{ profile: LearningProfile }>("/api/profile"),
       api<{ items: MeetingItem[] }>("/api/library?view=meetings"),
       api<{ items: Record<string, unknown>[] }>("/api/library?view=knowledge"),
+      api<{ items: NoteItem[] }>("/api/library?view=notes"),
+      api<{ settings: WorkspaceSettings }>("/api/settings"),
+      api<{ items: DiscoveryItem[] }>("/api/discoveries"),
       api<{ canRestore: boolean }>("/api/session/status"),
     ])
-      .then(([demoPayload, profilePayload, meetingPayload, knowledgePayload, sessionPayload]) => {
+      .then(([demoPayload, meetingPayload, knowledgePayload, notesPayload, settingsPayload, discoveryPayload, sessionPayload]) => {
+        const loadedMeetings = meetingPayload.items || [];
         setDemo(demoPayload);
-        setProfile(profilePayload.profile);
-        setMeetings(meetingPayload.items || []);
+        setMeetings(loadedMeetings);
         setKnowledge(knowledgePayload.items || []);
+        setNotes(notesPayload.items || []);
+        setWorkspaceSettings(settingsPayload.settings);
+        setDiscoveries(discoveryPayload.items || []);
         setCanRestore(sessionPayload.canRestore);
+        const requestedAnalysisId = new URL(window.location.href).searchParams.get("analysis");
+        const activeItems = loadedMeetings.filter((item) => isAnalysisActive(item.status));
+        if (requestedAnalysisId) {
+          const requestedMeeting = activeItems.find((item) => item.analysisId === requestedAnalysisId);
+          if (requestedMeeting) {
+            setAnalysis(analysisPreview(requestedMeeting, language));
+            setView("progress");
+          }
+          void openAnalysis(requestedAnalysisId);
+        } else if (activeItems.length) {
+          setView("tasks");
+        }
       })
       .catch((error) => notify(error instanceof Error ? error.message : "加载失败"))
       .finally(() => setLoading(false));
   }, [notify]);
 
   const navigate = useCallback((next: View) => {
-    if (next !== "progress" && next !== "detail") setPreviousView(next);
+    if (next !== "progress" && next !== "detail") {
+      analysisRequestVersion.current += 1;
+      setPreviousView(next);
+      replaceAnalysisUrl();
+    }
     setView(next);
     window.scrollTo({ top: 0, behavior: "instant" });
   }, []);
 
-  async function pollAnalysis(analysisId: string) {
+  async function pollAnalysis(analysisId: string, requestVersion: number) {
     const deadline = Date.now() + 12 * 60 * 1000;
     while (Date.now() < deadline) {
+      if (analysisRequestVersion.current !== requestVersion) return;
       const payload = await api<{ analysis: Analysis }>(`/api/analyses/${analysisId}`);
+      if (analysisRequestVersion.current !== requestVersion) return;
       setAnalysis(payload.analysis);
       if (payload.analysis.result) {
         setView("detail");
-        notify(language === "zh" ? "真实分析已完成并自动归档" : "Analysis complete and archived");
-        await Promise.all([loadMeetings(), loadKnowledge()]);
+        notify(language === "zh" ? "分析完成，请决定是否纳入书架" : "Analysis complete. Choose whether to add it to your shelf.");
+        await Promise.all([loadMeetings(), loadKnowledge(), loadNotes()]);
         return;
       }
       if (["failed", "cancelled"].includes(payload.analysis.status)) {
@@ -197,6 +368,7 @@ export default function XianjianApp() {
       }
       await new Promise((resolve) => window.setTimeout(resolve, 8000));
     }
+    if (analysisRequestVersion.current !== requestVersion) return;
     setAnalysis((current) =>
       current
         ? { ...current, status: "recovering", progressText: "任务仍在运行，可稍后从历史记录恢复" }
@@ -205,11 +377,28 @@ export default function XianjianApp() {
   }
 
   async function openAnalysis(analysisId: string) {
-    setView("progress");
+    const requestVersion = ++analysisRequestVersion.current;
+    replaceAnalysisUrl(analysisId);
+    const cachedMeeting = meetings.find((item) => item.analysisId === analysisId);
+    if (cachedMeeting && isAnalysisActive(cachedMeeting.status)) {
+      setAnalysis(analysisPreview(cachedMeeting, language));
+      setView("progress");
+    }
     try {
-      await pollAnalysis(analysisId);
+      const payload = await api<{ analysis: Analysis }>(`/api/analyses/${analysisId}`);
+      if (analysisRequestVersion.current !== requestVersion) return;
+      setAnalysis(payload.analysis);
+      if (payload.analysis.result) {
+        setView("detail");
+        window.scrollTo({ top: 0, behavior: "instant" });
+        return;
+      }
+      setView("progress");
+      await pollAnalysis(analysisId, requestVersion);
     } catch (error) {
+      if (analysisRequestVersion.current !== requestVersion) return;
       notify(error instanceof Error ? error.message : "无法打开分析");
+      replaceAnalysisUrl();
       setView(previousView);
     }
   }
@@ -220,47 +409,99 @@ export default function XianjianApp() {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ state }),
     });
-    notify(
-      language === "zh"
-        ? state === "later" ? "已加入稍后看" : state === "completed" ? "已标记看完" : state === "skipped" ? "已跳过" : "已归档"
-        : "Saved"
-    );
-    await loadMeetings();
+    setAnalysis((current) => current?.meetingId === meetingId ? { ...current, meetingState: state } : current);
+    notify(language === "zh"
+      ? state === "shelved" ? "已纳入书架，技能树已自动更新" : state === "later" ? "已加入稍后看" : state === "completed" ? "已标记看完" : state === "skipped" ? "已跳过" : "未纳入书架，技能树已同步"
+      : state === "shelved" ? "Added to shelf. Skill tree updated." : "Saved");
+    await Promise.all([loadMeetings(), loadKnowledge()]);
+  }
+
+  async function updateAutoCreateNote(autoCreateNote: boolean) {
+    const payload = await api<{ settings: WorkspaceSettings }>("/api/settings", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ autoCreateNote }),
+    });
+    setWorkspaceSettings(payload.settings);
+    notify(language === "zh"
+      ? autoCreateNote ? "已开启每次分析自动生成笔记" : "已关闭自动生成笔记"
+      : autoCreateNote ? "Automatic notes enabled" : "Automatic notes disabled");
+  }
+
+  async function updateTitleMode(titleMode: WorkspaceSettings["titleMode"]) {
+    const payload = await api<{ settings: WorkspaceSettings }>("/api/settings", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ titleMode }),
+    });
+    setWorkspaceSettings(payload.settings);
+    notify(language === "zh"
+      ? titleMode === "automatic" ? "已开启自动生成内容标题" : "已沿用当前链接命名方式"
+      : titleMode === "automatic" ? "Automatic titles enabled" : "Current link naming retained");
+  }
+
+  async function updateDiscoverySettings(next: Partial<Pick<WorkspaceSettings, "autoDiscoverVideos" | "autoAnalyzeDiscoveries">>) {
+    const payload = await api<{ settings: WorkspaceSettings }>("/api/settings", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(next),
+    });
+    setWorkspaceSettings(payload.settings);
+    notify(language === "zh" ? "自动发现设置已保存" : "Discovery settings saved");
+  }
+
+  async function discoverNow() {
+    await api("/api/discoveries", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "run" }),
+    });
+    await Promise.all([loadDiscoveries(), loadMeetings()]);
+    notify(language === "zh" ? "已找到 1 条候选视频" : "Found one candidate video");
+  }
+
+  async function dismissDiscovery(id: string) {
+    await api("/api/discoveries", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "dismiss", id }),
+    });
+    await loadDiscoveries();
   }
 
   async function startAnalysis(input: {
+    contentType?: ContentType;
+    contentUrl?: string;
     videoUrl?: string;
     title?: string;
     source?: string;
     transcript?: string;
-    selectedProfile?: LearningProfile;
   }) {
+    const requestVersion = ++analysisRequestVersion.current;
     setShowAdd(false);
     setView("progress");
+    const contentType = input.contentType || "video";
+    const contentUrl = input.contentUrl || input.videoUrl;
     const displayTitle = input.title || (() => {
-      try { return `${new URL(input.videoUrl || "").hostname.replace(/^www\./, "")} 视频`; }
-      catch { return "公开视频"; }
+      try { return `${new URL(contentUrl || "").hostname.replace(/^www\./, "")} ${contentTypeLabel(contentType, "zh")}`; }
+      catch { return `公开${contentTypeLabel(contentType, "zh")}`; }
     })();
     setAnalysis({
       id: "",
       meetingId: "",
+      meetingState: "pending",
       title: displayTitle,
-      source: input.source || "视频链接",
+      source: input.source || `${contentTypeLabel(contentType, "zh")}链接`,
+      contentType,
+      contentUrl: contentUrl || null,
+      videoUrl: contentType === "video" ? contentUrl || null : null,
       status: "queued",
-      progressText: "正在保存视频链接",
+      progressText: `正在保存${contentTypeLabel(contentType, "zh")}链接`,
       taskId: null,
       result: null,
     });
     try {
-      if (input.selectedProfile) {
-        const saved = await api<{ profile: LearningProfile }>("/api/profile", {
-          method: "PATCH",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(input.selectedProfile),
-        });
-        setProfile(saved.profile);
-      }
-      const meetingPayload = await api<{ meeting: { id: string; title: string; source: string } }>(
+      const meetingPayload = await api<{ meeting: { id: string; title: string; source: string; contentType: ContentType; contentUrl?: string | null; videoUrl?: string | null } }>(
         "/api/meetings",
         {
           method: "POST",
@@ -268,10 +509,11 @@ export default function XianjianApp() {
           body: JSON.stringify(input),
         }
       );
+      if (analysisRequestVersion.current !== requestVersion) return;
       const meetingId = meetingPayload.meeting.id;
       setAnalysis((current) =>
         current
-          ? { ...current, meetingId, title: meetingPayload.meeting.title, source: meetingPayload.meeting.source, progressText: "正在连接真实 Agent" }
+          ? { ...current, meetingId, title: meetingPayload.meeting.title, source: meetingPayload.meeting.source, contentType: meetingPayload.meeting.contentType, contentUrl: meetingPayload.meeting.contentUrl || current.contentUrl, videoUrl: meetingPayload.meeting.videoUrl || current.videoUrl, progressText: "正在连接真实 Agent" }
           : current
       );
       const response = await fetch(`/api/meetings/${meetingId}/analyze`, { method: "POST" });
@@ -285,6 +527,10 @@ export default function XianjianApp() {
       let recoveryId = "";
       while (true) {
         const { value, done } = await reader.read();
+        if (analysisRequestVersion.current !== requestVersion) {
+          await reader.cancel();
+          return;
+        }
         if (done) break;
         buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
         const blocks = buffer.split("\n\n");
@@ -295,6 +541,8 @@ export default function XianjianApp() {
           if (!text) continue;
           const data = JSON.parse(text) as Record<string, unknown>;
           if (eventName === "created" || eventName === "progress") {
+            const nextAnalysisId = String(data.analysisId || "");
+            if (nextAnalysisId) replaceAnalysisUrl(nextAnalysisId);
             setAnalysis((current) =>
               current
                 ? {
@@ -306,30 +554,37 @@ export default function XianjianApp() {
                   }
                 : current
             );
+            if (eventName === "created") void loadMeetings();
           } else if (eventName === "deduplicated") {
             recoveryId = String(data.analysisId);
+            if (recoveryId) replaceAnalysisUrl(recoveryId);
           } else if (eventName === "started") {
             recoveryId = String(data.analysisId);
+            if (recoveryId) replaceAnalysisUrl(recoveryId);
             setAnalysis((current) =>
               current
                 ? { ...current, id: recoveryId, taskId: String(data.taskId), status: "recovering", progressText: "真实任务运行中，可刷新恢复" }
                 : current
             );
+            void loadMeetings();
           } else if (eventName === "completed") {
+            const completedAnalysisId = String(data.analysisId || "");
+            if (completedAnalysisId) replaceAnalysisUrl(completedAnalysisId);
             setAnalysis((current) =>
               current
-                ? { ...current, id: String(data.analysisId), taskId: String(data.taskId), status: "completed", progressText: "分析完成", result: data.result as XianjianAnalysisResult }
+                ? { ...current, id: String(data.analysisId), taskId: String(data.taskId), status: "completed", progressText: "分析完成", meetingState: current.meetingState || "pending", result: data.result as XianjianAnalysisResult }
                 : current
             );
             setView("detail");
-            await Promise.all([loadMeetings(), loadKnowledge()]);
+            await Promise.all([loadMeetings(), loadKnowledge(), loadNotes()]);
           } else if (eventName === "error") {
             throw new Error(String(data.error || "分析失败"));
           }
         }
       }
-      if (recoveryId) await pollAnalysis(recoveryId);
+      if (recoveryId) await pollAnalysis(recoveryId, requestVersion);
     } catch (error) {
+      if (analysisRequestVersion.current !== requestVersion) return;
       const message = error instanceof Error ? error.message : "分析失败";
       setAnalysis((current) => current ? { ...current, status: "failed", progressText: "分析未完成", errorMessage: message } : current);
       notify(message);
@@ -341,10 +596,44 @@ export default function XianjianApp() {
     if (!normalized) return meetings;
     return meetings.filter((item) => `${item.title} ${item.source} ${item.result?.summary || ""}`.toLowerCase().includes(normalized));
   }, [meetings, query]);
-  const laterMeetings = visibleMeetings.filter((item) => item.state === "later");
+  const shelfMeetings = visibleMeetings.filter((item) => isOnShelf(item.state));
   const savedTotal = meetings.reduce((total, item) => total + (item.result?.savedSeconds || 0), 0);
   const worthCount = meetings.filter((item) => item.result?.verdict === "worth").length;
   const skipCount = meetings.filter((item) => item.result?.verdict === "skip").length;
+  const currentAnalysisIsActive = isAnalysisActive(analysis?.status);
+  const activeMeetings = meetings.filter((item) => isAnalysisActive(item.status));
+  const activeMeeting = activeMeetings.find((item) => item.analysisId === analysis?.id) || activeMeetings[0];
+  const sidebarAnalysisId = (currentAnalysisIsActive ? analysis?.id : "") || activeMeeting?.analysisId || "";
+  const sidebarAnalysisTitle = (currentAnalysisIsActive ? analysis?.title : "") || activeMeeting?.title || "";
+  const sidebarProgressText = (currentAnalysisIsActive ? analysis?.progressText : "") ||
+    (language === "zh" ? "真实任务仍在运行，可刷新恢复" : "The task is still running and survives refresh");
+  const sidebarHasActiveAnalysis = currentAnalysisIsActive || Boolean(activeMeeting);
+  const currentAnalysisAlreadyListed = Boolean(analysis?.id && activeMeetings.some((item) => item.analysisId === analysis.id));
+  const activeTaskCount = activeMeetings.length + (currentAnalysisIsActive && !currentAnalysisAlreadyListed ? 1 : 0);
+  const activeTaskItems = [
+    ...activeMeetings,
+    ...(currentAnalysisIsActive && !currentAnalysisAlreadyListed
+      ? [{
+          id: analysis!.meetingId || analysis!.id || "starting-analysis",
+          analysisId: analysis!.id || undefined,
+          title: analysis!.title,
+          source: analysis!.source,
+          contentType: analysis!.contentType,
+          durationSeconds: 0,
+          state: analysis!.meetingState,
+          createdAt: "",
+          status: analysis!.status,
+          progressText: analysis!.progressText,
+          taskId: analysis!.taskId || undefined,
+        }]
+      : []),
+  ];
+
+  useEffect(() => {
+    if (!activeTaskCount) return;
+    const timer = window.setInterval(() => void loadMeetings(), 8_000);
+    return () => window.clearInterval(timer);
+  }, [activeTaskCount, loadMeetings]);
   const pageName = t[view === "progress" || view === "detail" ? "detail" : view];
 
   if (loading) {
@@ -355,27 +644,30 @@ export default function XianjianApp() {
     <div className="app-shell final-ui">
       <aside className="sidebar">
         <button className="brand" onClick={() => navigate("home")} aria-label={t.home}>
-          <span className="brand-mark">先</span>
-          <span><strong>先鉴</strong><small>Conference OS</small></span>
+          <span className="brand-mark">未</span>
+          <span className="brand-copy"><strong>未读先知</strong><i aria-hidden="true" /><small>{language === "zh" ? "学习决策助手" : "Learning guide"}</small></span>
         </button>
         <nav className="main-nav" aria-label="主要导航">
-          {(["home", "later", "history", "skills", "profile"] as const).map((item) => (
-            <button key={item} className={`nav-item ${view === item ? "active" : ""}`} onClick={() => navigate(item)}>
+          {(["home", "tasks", "later", "history", "notes", "skills"] as const).map((item) => (
+            <button key={item} className={`nav-item ${view === item ? "active" : ""}`} onClick={() => navigate(item)} aria-label={t[item]}>
               <NavIcon kind={item} /><span>{t[item]}</span>
-              {item === "later" && <b>{laterMeetings.length}</b>}
+              {item === "later" && <b>{meetings.filter((meeting) => isOnShelf(meeting.state)).length}</b>}
+              {item === "tasks" && <b className={activeTaskCount ? "active-count" : ""}>{activeTaskCount}</b>}
+              {item === "notes" && <b>{notes.length}</b>}
             </button>
           ))}
         </nav>
-        <div className="side-note">
-          <div className="mini-mascot"><img src="/mascot.png" alt="" /></div>
-          <strong>{analysis?.status === "running" ? (language === "zh" ? "Mira 正在先看" : "Mira is previewing") : (language === "zh" ? "暂无进行中的分析" : "No active analysis")}</strong>
-          <span>{analysis?.status === "running" ? analysis.title : language === "zh" ? "添加公开视频链接即可开始" : "Add a public video URL to begin"}</span>
-          <div className="progress"><i style={{ width: analysis?.status === "running" ? "68%" : "0%" }} /></div>
-          <small>{analysis?.status === "running" ? analysis.progressText : language === "zh" ? "这里不会显示虚构任务" : "No placeholder task is shown here"}</small>
+        <div className={`side-note ${sidebarHasActiveAnalysis ? "is-active" : ""}`}>
+          <div className="mini-mascot"><img src="/mascot-v2.png" alt="" /></div>
+          <strong>{sidebarHasActiveAnalysis ? (language === "zh" ? `Mira 正在分析 ${activeTaskCount} 项` : `Mira is analyzing ${activeTaskCount}`) : (language === "zh" ? "暂无进行中的分析" : "No active analysis")}</strong>
+          <span>{sidebarHasActiveAnalysis ? sidebarAnalysisTitle : language === "zh" ? "添加公开视频、文章或论文即可开始" : "Add a public video, article or paper to begin"}</span>
+          <div className="progress"><i style={{ width: sidebarHasActiveAnalysis ? "68%" : "0%" }} /></div>
+          <small>{sidebarHasActiveAnalysis ? sidebarProgressText : language === "zh" ? "这里不会显示虚构任务" : "No placeholder task is shown here"}</small>
+          {sidebarHasActiveAnalysis && <button className="side-note-open" onClick={() => activeTaskCount === 1 && sidebarAnalysisId ? openAnalysis(sidebarAnalysisId) : navigate("tasks")} aria-label={language === "zh" ? "打开运行中任务列表" : "Open running task list"} />}
         </div>
         <div className="profile-chip">
-          <button className="profile-identity-button" onClick={() => navigate("profile")} aria-label={t.profile}>
-            <span>NC</span><div><strong>Nan Cheng</strong><small>{language === "zh" ? "产品学习者" : "Product learner"}</small></div>
+          <button className="profile-identity-button" onClick={() => navigate("settings")} aria-label={t.settings}>
+            <span>匿</span><div><strong>{language === "zh" ? "匿名用户" : "Anonymous user"}</strong><small>{language === "zh" ? "个人信息与设置" : "Personal info & settings"}</small></div>
           </button>
           <button className="settings-trigger" onClick={() => navigate("settings")} aria-label={t.settings} title={t.settings}>•••</button>
         </div>
@@ -399,7 +691,24 @@ export default function XianjianApp() {
                 </div>
               )}
             </div>
-            <button className="primary-button" onClick={() => setShowAdd(true)}>＋ {t.add}</button>
+            <div className="task-list-wrap">
+              <button className={`task-list-trigger ${activeTaskCount ? "has-active" : ""}`} onClick={() => setTaskListOpen((open) => !open)} aria-expanded={taskListOpen} aria-label={language === "zh" ? `运行中任务 ${activeTaskCount} 项` : `${activeTaskCount} active tasks`}><span>◷</span><b>{language === "zh" ? "运行中" : "Running"}</b><i>{activeTaskCount}</i></button>
+              {taskListOpen && (
+                <div className="task-list-popover">
+                  <div className="task-list-head"><strong>{language === "zh" ? "运行中任务" : "Running tasks"}</strong><span>{activeTaskCount}</span></div>
+                  {activeTaskItems.length ? activeTaskItems.map((item) => (
+                    <button key={item.analysisId || item.id} onClick={() => { setTaskListOpen(false); if (item.analysisId) void openAnalysis(item.analysisId); }}>
+                      <span className="task-kind">{contentTypeLabel(item.contentType || "video", language)}</span>
+                      <span><strong>{item.title}</strong><small>{item.progressText || (language === "zh" ? "真实任务运行中，可刷新恢复" : "Running and recoverable")}</small>{item.taskId && <code>{item.taskId}</code>}</span>
+                      <i>→</i>
+                    </button>
+                  )) : <p>{language === "zh" ? "当前没有运行中的任务" : "No tasks are running"}</p>}
+                  <button className="task-list-all" onClick={() => { setTaskListOpen(false); navigate("tasks"); }}><span>{language === "zh" ? "查看完整运行列表" : "View all running tasks"}</span><i>→</i></button>
+                </div>
+              )}
+            </div>
+            <button className="infini-connect" onClick={() => setShowConnect(true)} title={language === "zh" ? "连接 InfiniSynapse" : "Connect InfiniSynapse"}><span>◌</span><b>{language === "zh" ? "连接 InfiniSynapse" : "Connect InfiniSynapse"}</b></button>
+            <button className="primary-button add-content-button" onClick={() => { setShowAdd(true); setTaskListOpen(false); notify(language === "zh" ? "已打开内容分析窗口" : "Analysis form opened"); }}>＋ {t.add}</button>
           </div>
         </header>
 
@@ -410,17 +719,36 @@ export default function XianjianApp() {
             worthCount={worthCount}
             skipCount={skipCount}
             savedTotal={savedTotal}
-            laterCount={laterMeetings.length}
+            laterCount={shelfMeetings.length}
             knowledgeCount={knowledge.length}
+            discoveries={discoveries}
+            activeTasks={activeTaskItems}
+            autoDiscoveryEnabled={workspaceSettings.autoDiscoverVideos}
             onNavigate={navigate}
             onOpen={openAnalysis}
+            onDiscoverNow={discoverNow}
+            onDismissDiscovery={dismissDiscovery}
+            onAnalyzeDiscovery={async (item) => {
+              if (item.analysisId) {
+                await openAnalysis(item.analysisId);
+                return;
+              }
+              await dismissDiscovery(item.id);
+              await startAnalysis({ videoUrl: item.videoUrl, title: item.title });
+            }}
           />
         )}
+        {view === "tasks" && (
+          <RunningTasksView language={language} items={activeTaskItems} onOpen={openAnalysis} onAdd={() => setShowAdd(true)} />
+        )}
         {view === "later" && (
-          <LaterView language={language} items={laterMeetings} onOpen={openAnalysis} onState={updateMeetingState} />
+          <VideoShelfView language={language} items={visibleMeetings} onOpen={openAnalysis} onState={updateMeetingState} />
         )}
         {view === "history" && (
           <HistoryView language={language} items={visibleMeetings} savedTotal={savedTotal} onOpen={openAnalysis} />
+        )}
+        {view === "notes" && (
+          <NotesView language={language} items={notes} onChanged={loadNotes} />
         )}
         {view === "skills" && (
           <SkillsView language={language} knowledge={knowledge} onOpen={() => {
@@ -429,21 +757,19 @@ export default function XianjianApp() {
             else setShowAdd(true);
           }} />
         )}
-        {view === "profile" && (
-          <ProfileView language={language} profile={profile} onSave={async (next) => {
-            const saved = await api<{ profile: LearningProfile }>("/api/profile", {
-              method: "PATCH",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify(next),
-            });
-            setProfile(saved.profile);
-            notify(language === "zh" ? "个人画像已保存" : "Profile saved");
-          }} />
-        )}
         {view === "settings" && (
           <SettingsView
             language={language}
+            knowledgeCount={knowledge.length}
+            autoCreateNote={workspaceSettings.autoCreateNote}
+            autoDiscoverVideos={workspaceSettings.autoDiscoverVideos}
+            autoAnalyzeDiscoveries={workspaceSettings.autoAnalyzeDiscoveries}
+            titleMode={workspaceSettings.titleMode}
             canRestore={canRestore}
+            onAutoCreateNoteChange={updateAutoCreateNote}
+            onTitleModeChange={updateTitleMode}
+            onDiscoverySettingsChange={updateDiscoverySettings}
+            onDiscoverNow={discoverNow}
             onBlank={async () => {
               await api("/api/session/blank", { method: "POST" });
               window.location.assign("/");
@@ -454,30 +780,35 @@ export default function XianjianApp() {
             }}
           />
         )}
-        {view === "progress" && analysis && (
-          <ProgressView language={language} analysis={analysis} onBack={() => setView(previousView)} onRetry={() => analysis.id && openAnalysis(analysis.id)} />
+        {(view === "progress" || (view === "detail" && !analysis?.result)) && analysis && (
+          <ProgressView language={language} analysis={analysis} onBack={() => navigate(previousView)} onRetry={() => analysis.id && openAnalysis(analysis.id)} />
         )}
         {view === "detail" && analysis?.result && (
           <DetailView
             language={language}
             analysis={analysis}
-            onBack={() => setView(previousView)}
+            onBack={() => navigate(previousView)}
             onState={(state) => updateMeetingState(analysis.meetingId, state)}
-            onNoteSaved={() => notify(language === "zh" ? "时间码笔记已保存" : "Timestamp note saved")}
+            onNoteSaved={async () => {
+              await loadNotes();
+              notify(language === "zh" ? "时间码笔记已保存，可从左侧“笔记”打开" : "Timestamp note saved. Open it from Notes.");
+            }}
           />
         )}
       </main>
 
-      {showAdd && demo && (
-        <AddMeeting language={language} demo={demo} profile={profile} onClose={() => setShowAdd(false)} onStart={startAnalysis} notify={notify} />
+      {showAdd && (
+        <AddMeeting language={language} demo={demo} onClose={() => setShowAdd(false)} onStart={startAnalysis} notify={notify} />
       )}
+      {showConnect && <ConnectInfiniModal language={language} onClose={() => setShowConnect(false)} />}
       <div className={`toast ${toast ? "show" : ""}`}>{toast}</div>
     </div>
   );
 }
 
 function HomeView({
-  language, meetings, worthCount, skipCount, savedTotal, laterCount, knowledgeCount, onNavigate, onOpen,
+  language, meetings, worthCount, skipCount, savedTotal, laterCount, knowledgeCount,
+  discoveries, autoDiscoveryEnabled, activeTasks, onNavigate, onOpen, onDiscoverNow, onDismissDiscovery, onAnalyzeDiscovery,
 }: {
   language: Language;
   meetings: MeetingItem[];
@@ -486,21 +817,44 @@ function HomeView({
   savedTotal: number;
   laterCount: number;
   knowledgeCount: number;
+  discoveries: DiscoveryItem[];
+  autoDiscoveryEnabled: boolean;
+  activeTasks: MeetingItem[];
   onNavigate: (view: View) => void;
   onOpen: (id: string) => void;
+  onDiscoverNow: () => Promise<void>;
+  onDismissDiscovery: (id: string) => Promise<void>;
+  onAnalyzeDiscovery: (item: DiscoveryItem) => Promise<void>;
 }) {
   const items = meetings.filter((item) => item.result).slice(0, 4);
+  const [discoveryBusy, setDiscoveryBusy] = useState(false);
+  const candidate = discoveries[0];
+  const activeTask = activeTasks[0];
   return (
     <section className="page page-view">
       <div className="page-title home-title">
-        <div><span className="eyebrow">{currentDateLabel(language)}</span><h1>{items.length ? (language === "zh" ? "Mira 已经替你先看了一轮" : "Mira has previewed the latest talks.") : (language === "zh" ? "这是一个干净的学习空间" : "This is a clean learning workspace.")}</h1><p>{language === "zh" ? `${meetings.length} 场会议里，${worthCount} 场值得看，${skipCount} 场可以放心跳过。` : `${meetings.length} talks, ${worthCount} worth watching and ${skipCount} safe to skip.`}</p></div>
+        <div><span className="eyebrow">{currentDateLabel(language)}</span><h1>{activeTasks.length ? (language === "zh" ? `Mira 正在分析 ${activeTasks.length} 条内容` : `Mira is analyzing ${activeTasks.length} items`) : items.length ? (language === "zh" ? "Mira 已经替你先看了一轮" : "Mira has previewed the latest content.") : (language === "zh" ? "这是一个干净的学习空间" : "This is a clean learning workspace.")}</h1><p>{activeTasks.length ? (language === "zh" ? "任务会在后台继续运行，你可以随时打开运行列表查看进度。" : "Tasks continue in the background. Open the running list anytime.") : (language === "zh" ? `${meetings.length} 条内容里，${worthCount} 条值得看，${skipCount} 条可以放心跳过。` : `${meetings.length} items, ${worthCount} worth viewing and ${skipCount} safe to skip.`)}</p></div>
         <div className="saved-pill"><span>{language === "zh" ? "本周省下" : "TIME SAVED"}</span><strong>{formatTime(savedTotal)}</strong></div>
       </div>
+      {(candidate || autoDiscoveryEnabled) && (
+        <section className="discovery-band" aria-label={language === "zh" ? "自动发现的视频" : "Discovered video"}>
+          <div className="discovery-heading"><div><span className="eyebrow">DAILY DISCOVERY</span><h2>{language === "zh" ? "为你发现" : "Discovered for you"}</h2></div><span>{language === "zh" ? "每天最多 1 条" : "Up to 1 per day"}</span></div>
+          {candidate ? (
+            <article className="discovery-candidate">
+              <div className="discovery-source"><span>▶</span><small>{candidate.source}</small></div>
+              <div><span className="meta">{language === "zh" ? `兴趣关键词：${candidate.keyword}` : `Interest: ${candidate.keyword}`}</span><h3>{candidate.title}</h3><p>{candidate.snippet || (language === "zh" ? "公开检索找到的候选视频，尚未纳入书架。" : "A public search candidate that is not on your shelf yet.")}</p>{candidate.errorMessage && <small className="discovery-error">{candidate.errorMessage}</small>}</div>
+              <div className="discovery-actions"><button className="primary-button" disabled={discoveryBusy} onClick={async () => { setDiscoveryBusy(true); try { await onAnalyzeDiscovery(candidate); } finally { setDiscoveryBusy(false); } }}>{candidate.analysisId ? (language === "zh" ? "查看分析" : "View analysis") : (language === "zh" ? "分析这个视频" : "Analyze video")}</button><button className="text-button" disabled={discoveryBusy} onClick={async () => { setDiscoveryBusy(true); try { await onDismissDiscovery(candidate.id); } finally { setDiscoveryBusy(false); } }}>{language === "zh" ? "不感兴趣" : "Not interested"}</button></div>
+            </article>
+          ) : (
+            <div className="discovery-empty"><p>{knowledgeCount ? (language === "zh" ? "自动发现已开启，系统会根据书架主题在后台寻找下一条候选视频。" : "Discovery is on. The next candidate will use topics from your shelf.") : (language === "zh" ? "先将一个已分析视频纳入书架，系统才能形成兴趣关键词。" : "Add one analyzed video to your shelf to form interest keywords.")}</p><button className="outline-button" disabled={discoveryBusy || !knowledgeCount} onClick={async () => { setDiscoveryBusy(true); try { await onDiscoverNow(); } finally { setDiscoveryBusy(false); } }}>{language === "zh" ? "立即发现一条" : "Discover now"}</button></div>
+          )}
+        </section>
+      )}
       <div className="home-grid">
         <article className="companion-card">
           <div className="companion-copy"><span className="eyebrow">YOUR VIEWING COMPANION</span><h2>Mira</h2><p>{language === "zh" ? "你的先看伙伴" : "Your viewing companion"}</p></div>
-          <div className="mascot-stage"><div className="soft-orbit orbit-a" /><div className="soft-orbit orbit-b" /><img src="/mascot.png" alt="Mira" /></div>
-          <div className="watching-now"><div className="watching-line"><i /><strong>{language === "zh" ? "随时待命" : "Ready"}</strong><span>●</span></div><p>{language === "zh" ? "粘贴视频链接即可开始" : "Paste a video link to begin"}</p><div className="progress"><i style={{ width: "0%" }} /></div><small>{language === "zh" ? "公开视频 · 自动读取字幕与时间码" : "Public videos · captions and timestamps"}</small></div>
+          <div className="mascot-stage"><div className="soft-orbit orbit-a" /><div className="soft-orbit orbit-b" /><img src="/mascot-v2.png" alt="未读先知学习分身" /></div>
+          <button className={`watching-now ${activeTask ? "is-active" : ""}`} disabled={!activeTask?.analysisId} onClick={() => activeTask?.analysisId && onOpen(activeTask.analysisId)}><div className="watching-line"><i /><strong>{activeTask ? (language === "zh" ? `正在分析 · ${contentTypeLabel(activeTask.contentType || "video", language)}` : `Analyzing · ${contentTypeLabel(activeTask.contentType || "video", language)}`) : (language === "zh" ? "随时待命" : "Ready")}</strong><span>{activeTasks.length > 1 ? `+${activeTasks.length - 1}` : "●"}</span></div><p>{activeTask?.title || (language === "zh" ? "粘贴内容链接即可开始" : "Paste a content link to begin")}</p><div className="progress"><i style={{ width: activeTask ? (activeTask.status === "recovering" ? "76%" : "48%") : "0%" }} /></div><small>{activeTask?.progressText || (language === "zh" ? "视频、文章、论文均可分析" : "Videos, articles and papers supported")}</small></button>
         </article>
         <article className="feed-card">
           <div className="section-head"><div><h2>{language === "zh" ? "Mira 先替你看过了" : "Mira previewed these for you"}</h2><p>{language === "zh" ? "有用的留下，没必要看的也如实告诉你。" : "Keep the useful parts. Skip the rest."}</p></div><span className="count-badge">{language === "zh" ? `共 ${meetings.length} 场` : `${meetings.length} talks`}</span></div>
@@ -530,24 +884,50 @@ function HomeView({
   );
 }
 
-function LaterView({ language, items, onOpen, onState }: { language: Language; items: MeetingItem[]; onOpen: (id: string) => void; onState: (id: string, state: string) => void }) {
-  const full = items.reduce((sum, item) => sum + (item.result?.totalDurationSeconds || item.durationSeconds || 0), 0);
-  const selected = items.reduce((sum, item) => sum + (item.result?.recommendedSeconds || 0), 0);
+function RunningTasksView({ language, items, onOpen, onAdd }: { language: Language; items: MeetingItem[]; onOpen: (id: string) => void; onAdd: () => void }) {
+  return (
+    <section className="page page-view running-tasks-page">
+      <div className="page-title"><div><span className="eyebrow">ACTIVE ANALYSES</span><h1>{language === "zh" ? "运行中任务" : "Running tasks"}</h1><p>{language === "zh" ? "这里集中显示所有正在排队、分析、恢复和整理结果的内容。" : "All queued, running, recovering and repairing analyses appear here."}</p></div><button className="primary-button" onClick={onAdd}>＋ {language === "zh" ? "添加内容" : "Add content"}</button></div>
+      <article className="running-task-panel">
+        <div className="running-task-summary"><div><span>{language === "zh" ? "正在运行" : "ACTIVE"}</span><strong>{items.length}</strong></div><p>{language === "zh" ? "任务在后台继续执行，离开此页面或刷新不会中断。" : "Tasks continue in the background when you leave or refresh."}</p></div>
+        <div className="running-task-list">
+          {items.length ? items.map((item) => (
+            <button key={item.analysisId || item.id} disabled={!item.analysisId} onClick={() => item.analysisId && onOpen(item.analysisId)}>
+              <span className="running-task-kind">{contentTypeLabel(item.contentType || "video", language)}</span>
+              <span className="running-task-copy"><strong>{item.title}</strong><small>{item.progressText || (language === "zh" ? "正在启动真实分析任务" : "Starting the analysis task")}</small></span>
+              <span className={`running-task-status ${item.status || "queued"}`}><i />{item.status || "queued"}</span>
+              <code>{item.taskId || (language === "zh" ? "正在获取 taskId" : "Getting taskId")}</code>
+              <i className="running-task-arrow">→</i>
+            </button>
+          )) : <div className="running-task-empty"><span>◷</span><h2>{language === "zh" ? "当前没有运行中的任务" : "No tasks are running"}</h2><p>{language === "zh" ? "添加视频、文章或论文后，任务会立即出现在这里。" : "Add a video, article or paper and it will appear here immediately."}</p><button className="primary-button" onClick={onAdd}>{language === "zh" ? "开始分析" : "Start analysis"}</button></div>}
+        </div>
+      </article>
+    </section>
+  );
+}
+
+function VideoShelfView({ language, items, onOpen, onState }: { language: Language; items: MeetingItem[]; onOpen: (id: string) => void; onState: (id: string, state: string) => Promise<void> }) {
+  const [filter, setFilter] = useState<"all" | "shelved" | "later" | "completed">("all");
+  const itemsOnShelf = items.filter((item) => isOnShelf(item.state));
+  const shelfItems = filter === "all" ? itemsOnShelf : itemsOnShelf.filter((item) => item.state === filter);
+  const full = itemsOnShelf.reduce((sum, item) => sum + (item.result?.totalDurationSeconds || item.durationSeconds || 0), 0);
+  const selected = itemsOnShelf.reduce((sum, item) => sum + (item.result?.recommendedSeconds || 0), 0);
+  const percent = (state: string) => itemsOnShelf.length ? Math.round((itemsOnShelf.filter((item) => item.state === state).length / itemsOnShelf.length) * 100) : 0;
   return (
     <section className="page page-view">
-      <div className="page-title"><div><span className="eyebrow">YOUR QUEUE</span><h1>{copy[language].later}</h1><p>{language === "zh" ? "只留下真正值得投入时间的内容。" : "Only keep content worth your time."}</p></div><button className="secondary-button">{language === "zh" ? "按相关度排序" : "Sorted by relevance"}</button></div>
+      <div className="page-title"><div><span className="eyebrow">CONTENT LIBRARY</span><h1>{copy[language].later}</h1><p>{language === "zh" ? "只收录你确认值得保留的内容；入架后，技能树会自动同步更新。" : "Only content you choose to keep appears here. Adding it also updates your skill tree."}</p></div></div>
       <div className="two-column">
         <article className="content-panel queue-panel">
-          <div className="section-head"><div><h2>{language === "zh" ? "待看清单" : "Watch queue"}</h2><p>{language === "zh" ? "按与你当前项目的相关度排序" : "Ranked for your current project"}</p></div><div className="inline-tabs"><button className="active">{language === "zh" ? `全部 ${items.length}` : `All ${items.length}`}</button><button>{language === "zh" ? "本周" : "This week"}</button><button>{language === "zh" ? "会议" : "Talks"}</button></div></div>
+          <div className="section-head"><div><h2>{language === "zh" ? "我的内容" : "My content"}</h2><p>{language === "zh" ? "点击内容可重新打开分析路线" : "Open an item to revisit its analysis route"}</p></div><div className="inline-tabs"><button className={filter === "all" ? "active" : ""} onClick={() => setFilter("all")}>{language === "zh" ? `全部 ${itemsOnShelf.length}` : `All ${itemsOnShelf.length}`}</button><button className={filter === "shelved" ? "active" : ""} onClick={() => setFilter("shelved")}>{language === "zh" ? "已入架" : "Shelved"}</button><button className={filter === "later" ? "active" : ""} onClick={() => setFilter("later")}>{language === "zh" ? "稍后看" : "Later"}</button><button className={filter === "completed" ? "active" : ""} onClick={() => setFilter("completed")}>{language === "zh" ? "已看完" : "Done"}</button></div></div>
           <div className="queue-list">
-            {!items.length && <div className="panel-empty">{copy[language].noItems}</div>}
-            {items.map((item, index) => {
+            {!shelfItems.length && <div className="panel-empty">{language === "zh" ? "书架还是空的。完成分析后，由你决定哪些内容值得纳入。" : "Your shelf is empty. After analysis, you decide what is worth keeping."}</div>}
+            {shelfItems.map((item, index) => {
               const result = item.result;
               return (
                 <div className="queue-item" key={item.id}>
-                  <div className={`video-cover ${index % 3 === 0 ? "cover-agent" : index % 3 === 1 ? "cover-design" : "cover-memory"}`}><span>{item.source.split(/[·｜|]/)[0]}</span><i>{timecode(result?.totalDurationSeconds || item.durationSeconds)}</i></div>
-                  <div className="queue-copy"><span className="meta"><b className="status keep">{result ? verdictLabel(result.verdict, language) : "待分析"}</b>{item.source}</span><h3>{item.title}</h3><p>{result?.summary || "Mira 正在整理观看路线"}</p><div className="tag-row">{result?.newKnowledge.slice(0, 3).map((tag) => <span key={tag.topic}>{tag.topic}</span>)}</div></div>
-                  <div className="queue-action"><strong>{formatTime(result?.recommendedSeconds || 0)}</strong><small>{language === "zh" ? `原长 ${formatTime(result?.totalDurationSeconds || item.durationSeconds)}` : `of ${formatTime(result?.totalDurationSeconds || item.durationSeconds)}`}</small>{item.analysisId && <button onClick={() => onOpen(item.analysisId!)}>{language === "zh" ? "开始看" : "Open"}</button>}<button className="outline-button" onClick={() => onState(item.id, "archived")}>{language === "zh" ? "移出" : "Remove"}</button></div>
+                  <div className={`video-cover ${index % 3 === 0 ? "cover-agent" : index % 3 === 1 ? "cover-design" : "cover-memory"}`}><span>{item.source.split(/[·｜|]/)[0]}</span><i>{(item.contentType || "video") === "video" ? timecode(result?.totalDurationSeconds || item.durationSeconds) : contentTypeLabel(item.contentType || "video", language)}</i></div>
+                  <div className="queue-copy"><span className="meta"><b className="status keep">{result ? verdictLabel(result.verdict, language) : "待分析"}</b>{item.source}</span><h3>{item.title}</h3><p>{result?.summary || "Mira 正在整理内容路线"}</p><div className="tag-row">{result?.newKnowledge.slice(0, 3).map((tag) => <span key={tag.topic}>{tag.topic}</span>)}</div></div>
+                  <div className="queue-action"><strong>{(item.contentType || "video") === "video" ? formatTime(result?.recommendedSeconds || 0) : `${result?.segments.filter((segment) => segment.decision === "watch").length || 0} ${language === "zh" ? "节" : "sections"}`}</strong><small>{(item.contentType || "video") === "video" ? (language === "zh" ? `原长 ${formatTime(result?.totalDurationSeconds || item.durationSeconds)}` : `of ${formatTime(result?.totalDurationSeconds || item.durationSeconds)}`) : contentTypeLabel(item.contentType || "video", language)}</small>{item.analysisId && <button onClick={() => onOpen(item.analysisId!)}>{language === "zh" ? "打开路线" : "Open route"}</button>}<button className="outline-button" onClick={() => onState(item.id, item.state === "later" ? "shelved" : "later")}>{item.state === "later" ? (language === "zh" ? "移出稍后看" : "Remove from later") : (language === "zh" ? "加入稍后看" : "Watch later")}</button><button className="text-button shelf-remove" onClick={() => onState(item.id, "archived")}>{language === "zh" ? "移出书架" : "Remove from shelf"}</button></div>
                 </div>
               );
             })}
@@ -555,9 +935,98 @@ function LaterView({ language, items, onOpen, onState }: { language: Language; i
         </article>
         <aside className="summary-column">
           <article className="summary-hero"><span className="eyebrow">{language === "zh" ? "本周观看计划" : "WEEKLY PLAN"}</span><strong>{formatTime(full)}</strong><p>{language === "zh" ? "完整内容时长" : "Full duration"}</p><div className="saving-arrow"><span>{language === "zh" ? "由 Mira 精简为" : "Mira condensed it to"}</span><i>↓</i></div><strong className="accent-number">{formatTime(selected)}</strong><p>{language === "zh" ? "真正需要看的部分" : "What you need to watch"}</p></article>
-          <article className="mini-panel"><div className="mini-panel-head"><strong>{language === "zh" ? "按目标分布" : "By goal"}</strong><span>{items.length} {language === "zh" ? "项" : "items"}</span></div><div className="bar-row"><span>Agent</span><i><b style={{ width: "64%" }} /></i><em>64%</em></div><div className="bar-row"><span>{language === "zh" ? "产品设计" : "Product"}</span><i><b style={{ width: "23%" }} /></i><em>23%</em></div><div className="bar-row"><span>{language === "zh" ? "其他" : "Other"}</span><i><b style={{ width: "13%" }} /></i><em>13%</em></div></article>
+          <article className="mini-panel"><div className="mini-panel-head"><strong>{language === "zh" ? "按状态分布" : "By status"}</strong><span>{itemsOnShelf.length} {language === "zh" ? "条内容" : "items"}</span></div>{[["shelved", language === "zh" ? "已入架" : "Shelved"], ["later", language === "zh" ? "稍后看" : "Later"], ["completed", language === "zh" ? "已看完" : "Completed"]].map(([state, label]) => <div className="bar-row" key={state}><span>{label}</span><i><b style={{ width: `${percent(state)}%` }} /></i><em>{percent(state)}%</em></div>)}</article>
         </aside>
       </div>
+    </section>
+  );
+}
+
+function NotesView({ language, items, onChanged }: { language: Language; items: NoteItem[]; onChanged: () => Promise<void> }) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const save = async (item: NoteItem) => {
+    if (!draft.trim()) return;
+    setBusyId(item.id);
+    try {
+      await api(`/api/notes/${item.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ content: draft }),
+      });
+      setEditingId(null);
+      await onChanged();
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const remove = async (item: NoteItem) => {
+    setBusyId(item.id);
+    try {
+      await api(`/api/notes/${item.id}`, { method: "DELETE" });
+      await onChanged();
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const exportNotebook = () => {
+    const exportedAt = new Date().toLocaleString(language === "zh" ? "zh-CN" : "en-US");
+    const entries = items.map((item) => [
+      `## ${item.title}`,
+      item.timecodeSeconds == null ? "" : `时间码：${timecode(item.timecodeSeconds)}`,
+      "",
+      item.content,
+    ].filter(Boolean).join("\n")).join("\n\n---\n\n");
+    const markdown = `# ${language === "zh" ? "未读先知笔记本" : "Unread Insight notebook"}\n\n${language === "zh" ? "导出时间" : "Exported"}：${exportedAt}\n\n${entries}`;
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(new Blob([markdown], { type: "text/markdown;charset=utf-8" }));
+    link.download = `unread-insight-notes-${new Date().toISOString().slice(0, 10)}.md`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(link.href), 0);
+  };
+
+  return (
+    <section className="page page-view notes-page">
+      <div className="page-title"><div><span className="eyebrow">TIMESTAMP NOTEBOOK</span><h1>{copy[language].notes}</h1><p>{language === "zh" ? "所有在分析片段下写过的时间码笔记，都集中保存在这里。" : "Every timestamp note written under an analyzed segment is collected here."}</p></div><div className="saved-pill"><span>{language === "zh" ? "笔记总数" : "TOTAL NOTES"}</span><strong>{items.length}</strong></div></div>
+      <article className="content-panel notes-panel">
+        <div className="section-head border-bottom"><div><h2>{language === "zh" ? "我的笔记本" : "My notebook"}</h2><p>{language === "zh" ? "按最近修改排序" : "Sorted by latest edit"}</p></div><button className="outline-button export-notes" disabled={!items.length} onClick={exportNotebook}>{language === "zh" ? "导出 Markdown" : "Export Markdown"}</button></div>
+        {!items.length && <div className="notes-empty"><span>✎</span><h2>{language === "zh" ? "还没有笔记" : "No notes yet"}</h2><p>{language === "zh" ? "先打开一条内容的分析路线，在任意片段下添加笔记。" : "Open an analysis route and add a note under any segment."}</p></div>}
+        <div className="note-list">
+          {items.map((item) => (
+            <article className="note-entry" key={item.id}>
+              <div className="note-time">{item.timecodeSeconds == null ? "—" : timecode(item.timecodeSeconds)}</div>
+              <div className="note-body">
+                <span>{item.title}</span>
+                {editingId === item.id ? (
+                  <textarea value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={4000} autoFocus />
+                ) : (
+                  <p>{item.content}</p>
+                )}
+                <small>{new Date(item.updatedAt || item.createdAt).toLocaleString(language === "zh" ? "zh-CN" : "en-US", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}</small>
+              </div>
+              <div className="note-actions">
+                {editingId === item.id ? (
+                  <>
+                    <button disabled={busyId === item.id || !draft.trim()} onClick={() => save(item)}>{language === "zh" ? "保存" : "Save"}</button>
+                    <button className="ghost-action" onClick={() => setEditingId(null)}>{language === "zh" ? "取消" : "Cancel"}</button>
+                  </>
+                ) : (
+                  <>
+                    <button onClick={() => { setEditingId(item.id); setDraft(item.content); }}>{language === "zh" ? "编辑" : "Edit"}</button>
+                    <button className="ghost-action danger" disabled={busyId === item.id} onClick={() => remove(item)}>{language === "zh" ? "删除" : "Delete"}</button>
+                  </>
+                )}
+              </div>
+            </article>
+          ))}
+        </div>
+      </article>
     </section>
   );
 }
@@ -585,56 +1054,46 @@ function HistoryView({ language, items, savedTotal, onOpen }: { language: Langua
             })}
           </div>
         </article>
-        <aside className="history-stats"><article><span>{language === "zh" ? "累计省下" : "Time saved"}</span><strong>{formatTime(savedTotal)}</strong><small>{language === "zh" ? "来自真实分析结果" : "From real analyses"}</small></article><article><span>{language === "zh" ? "真正看完" : "Completed"}</span><strong>{items.filter((item) => item.state === "completed").length} {language === "zh" ? "场" : ""}</strong><small>{language === "zh" ? "聚焦高价值片段" : "Focused viewing"}</small></article><article className="mascot-tip"><img src="/mascot.png" alt="" /><div><strong>{language === "zh" ? "Mira 发现" : "Mira noticed"}</strong><p>{language === "zh" ? "你最近更愿意看带真实工程复盘的内容。" : "You prefer talks with real engineering retrospectives."}</p></div></article></aside>
+        <aside className="history-stats"><article><span>{language === "zh" ? "累计省下" : "Time saved"}</span><strong>{formatTime(savedTotal)}</strong><small>{language === "zh" ? "来自真实分析结果" : "From real analyses"}</small></article><article><span>{language === "zh" ? "真正看完" : "Completed"}</span><strong>{items.filter((item) => item.state === "completed").length} {language === "zh" ? "场" : ""}</strong><small>{language === "zh" ? "聚焦高价值片段" : "Focused viewing"}</small></article><article className="mascot-tip"><img src="/mascot-v2.png" alt="" /><div><strong>{language === "zh" ? "内容偏好" : "Content preference"}</strong><p>{items.length ? (language === "zh" ? "继续分析更多视频后，Mira 才会从真实记录中总结偏好。" : "Mira will summarize preferences after more real analyses.") : (language === "zh" ? "还没有足够数据形成偏好判断。" : "Not enough data to infer a preference yet.")}</p></div></article></aside>
       </div>
     </section>
   );
 }
 
 function SkillsView({ language, knowledge, onOpen }: { language: Language; knowledge: Record<string, unknown>[]; onOpen: () => void }) {
-  const recent = knowledge.slice(0, 3);
+  const recent = knowledge.slice(0, 6);
+  const focus = recent[0];
+  if (!knowledge.length) {
+    return (
+      <section className="page page-view">
+        <div className="page-title"><div><span className="eyebrow">LEARNING MAP</span><h1>{copy[language].skills}</h1><p>{language === "zh" ? "技能树只会使用你的真实分析结果生成。" : "Your skill tree is generated only from real analysis results."}</p></div></div>
+        <article className="true-empty-state skill-empty-state">
+          <span className="empty-symbol">◇</span>
+          <h2>{language === "zh" ? "技能树还是空的" : "Your skill tree is empty"}</h2>
+          <p>{language === "zh" ? "这里不会预填 Prompt、RAG 或 Agent Memory。完成内容分析并确认纳入书架后，提炼出的知识才会成为技能节点。" : "No Prompt, RAG or Agent Memory placeholders. Analyze content and add it to your shelf to create skill nodes."}</p>
+          <button className="primary-button" onClick={onOpen}>{language === "zh" ? "添加第一条内容" : "Add your first item"}</button>
+        </article>
+      </section>
+    );
+  }
   return (
     <section className="page page-view">
-      <div className="page-title"><div><span className="eyebrow">LEARNING MAP</span><h1>{copy[language].skills}</h1><p>{language === "zh" ? "看清自己已经会什么、正在补什么，以及下一步该学什么。" : "See what you know, what you are building, and what comes next."}</p></div></div>
+      <div className="page-title"><div><span className="eyebrow">LEARNING MAP</span><h1>{copy[language].skills}</h1><p>{language === "zh" ? "以下节点全部来自你的真实分析记录，不显示预设技能。" : "Every node below comes from your real analysis history; no preset skills are shown."}</p></div><div className="saved-pill"><span>{language === "zh" ? "真实节点" : "REAL NODES"}</span><strong>{knowledge.length}</strong></div></div>
       <div className="skill-layout">
-        <article className="skill-map-panel"><div className="section-head"><div><h2>{language === "zh" ? "Agent 产品学习路径" : "Agent product learning path"}</h2><p>{language === "zh" ? "根据你的会议记录与项目目标实时更新" : "Updated from your history and project goal"}</p></div><div className="map-legend"><span><i className="done" />{language === "zh" ? "已掌握" : "Mastered"}</span><span><i className="doing" />{language === "zh" ? "学习中" : "Learning"}</span><span><i />{language === "zh" ? "待解锁" : "Locked"}</span></div></div>
-          <div className="skill-map">
-            <div className="skill-column foundation"><span className="column-label">{language === "zh" ? "基础" : "Foundation"}</span><button className="skill-node done"><i>✓</i><strong>Prompt {language === "zh" ? "基础" : "Basics"}</strong><small>{language === "zh" ? "已掌握" : "Mastered"}</small></button><button className="skill-node done"><i>✓</i><strong>RAG {language === "zh" ? "基础" : "Basics"}</strong><small>{language === "zh" ? "已掌握" : "Mastered"}</small></button></div>
-            <span className="skill-connector" />
-            <div className="skill-column systems"><span className="column-label">{language === "zh" ? "系统能力" : "Systems"}</span><button className="skill-node done"><i>✓</i><strong>{language === "zh" ? "工具调用" : "Tool use"}</strong><small>{language === "zh" ? "已掌握" : "Mastered"}</small></button><button className="skill-node doing"><i>68</i><strong>Agent Memory</strong><small>{language === "zh" ? "学习中 · 68%" : "Learning · 68%"}</small></button><button className="skill-node doing"><i>52</i><strong>Agent {language === "zh" ? "评估" : "Evaluation"}</strong><small>{language === "zh" ? "学习中 · 52%" : "Learning · 52%"}</small></button></div>
-            <span className="skill-connector" />
-            <div className="skill-column product"><span className="column-label">{language === "zh" ? "产品能力" : "Product"}</span><button className="skill-node done"><i>✓</i><strong>{language === "zh" ? "任务等待体验" : "Waiting UX"}</strong><small>{language === "zh" ? "已掌握" : "Mastered"}</small></button><button className="skill-node doing"><i>36</i><strong>{language === "zh" ? "结果可信度" : "Result trust"}</strong><small>{language === "zh" ? "学习中 · 36%" : "Learning · 36%"}</small></button><button className="skill-node locked"><i>○</i><strong>{language === "zh" ? "长期个性化" : "Personalization"}</strong><small>{language === "zh" ? "待解锁" : "Locked"}</small></button></div>
-            <span className="skill-connector" />
-            <div className="skill-column outcome"><span className="column-label">{language === "zh" ? "项目目标" : "Goal"}</span><button className="skill-node goal"><i>先</i><strong>先鉴</strong><small>{language === "zh" ? "比赛原型" : "Competition project"}</small></button></div>
+        <article className="skill-map-panel"><div className="section-head"><div><h2>{language === "zh" ? "从内容中形成的技能节点" : "Skill nodes from your content"}</h2><p>{language === "zh" ? "状态与证据直接取自分析结果" : "Statuses and evidence come directly from analysis results"}</p></div><div className="map-legend"><span><i className="done" />{language === "zh" ? "已掌握" : "Known"}</span><span><i className="doing" />{language === "zh" ? "新增知识" : "New"}</span></div></div>
+          <div className="dynamic-skill-grid">
+            {knowledge.map((item, index) => {
+              const status = String(item.status || "new");
+              const mastered = /known|mastered|existing|重复|已掌握/i.test(status);
+              return <article className={`dynamic-skill-node ${mastered ? "mastered" : "new"}`} key={String(item.id || `${item.topic}-${index}`)}><i>{mastered ? "✓" : "+"}</i><div><strong>{String(item.topic || (language === "zh" ? "未命名主题" : "Untitled topic"))}</strong><p>{String(item.evidence || (language === "zh" ? "来自真实分析结果" : "From a real analysis result"))}</p></div><span>{mastered ? (language === "zh" ? "已掌握" : "Known") : (language === "zh" ? "新增" : "New")}</span></article>;
+            })}
           </div>
         </article>
-        <aside className="skill-side"><article className="current-skill"><span className="eyebrow">CURRENT FOCUS</span><strong>Agent Memory</strong><p>{language === "zh" ? "你已经理解存储与检索，接下来需要补齐“遗忘”和“评估”。" : "You understand storage and retrieval. Next: forgetting and evaluation."}</p><div className="skill-progress-ring"><span>68<small>%</small></span></div><button onClick={onOpen}>{language === "zh" ? "继续学习" : "Continue"}</button></article><article className="skill-gap"><span>{language === "zh" ? "当前最关键的缺口" : "KEY GAP"}</span><strong>{language === "zh" ? "如何判断记忆真的有用" : "Is this memory actually useful?"}</strong><p>{language === "zh" ? "完成 1 场会议的 3 个片段即可补齐。" : "Complete three segments from one talk."}</p><button onClick={onOpen}>{language === "zh" ? "查看对应会议 →" : "Open relevant talk →"}</button></article></aside>
+        <aside className="skill-side"><article className="current-skill dynamic-focus"><span className="eyebrow">LATEST UPDATE</span><strong>{String(focus.topic)}</strong><p>{String(focus.evidence || (language === "zh" ? "来自最近一次真实分析。" : "From your latest real analysis."))}</p><button onClick={onOpen}>{language === "zh" ? "打开对应内容" : "Open related content"}</button></article><article className="skill-gap"><span>{language === "zh" ? "如何继续生长" : "NEXT STEP"}</span><strong>{language === "zh" ? "再分析一个相邻主题" : "Analyze an adjacent topic"}</strong><p>{language === "zh" ? "新内容会追加节点，不会覆盖已经沉淀的知识。" : "New content appends nodes instead of replacing existing knowledge."}</p><button onClick={onOpen}>{language === "zh" ? "添加内容 →" : "Add content →"}</button></article></aside>
       </div>
       <div className="skill-cards-head"><div><h2>{language === "zh" ? "最近更新" : "Recent updates"}</h2><p>{language === "zh" ? "来自你看过、跳过和收藏的内容" : "From watched, skipped and saved content"}</p></div><button>{knowledge.length} {language === "zh" ? "项知识更新" : "updates"}</button></div>
       <div className="skill-update-grid">
-        {!recent.length && <div className="skill-update-empty">{language === "zh" ? "暂无真实知识更新。完成第一次视频分析后，这里会显示从结果中沉淀的主题与证据。" : "No real knowledge updates yet. Complete the first video analysis to populate this area with topics and evidence."}</div>}
         {recent.map((item, index) => <article key={`${String(item.topic)}-${index}`}><span className={`update-icon ${index === 0 ? "green" : index === 1 ? "navy" : "clay"}`}>{index === 0 ? "+" : index === 1 ? "↑" : "✓"}</span><div><strong>{String(item.topic)}</strong><p>{String(item.evidence)}</p></div><time>{language === "zh" ? "最近" : "Recent"}</time></article>)}
-      </div>
-    </section>
-  );
-}
-
-function ProfileView({ language, profile, onSave }: { language: Language; profile: LearningProfile; onSave: (profile: LearningProfile) => void }) {
-  const [draft, setDraft] = useState(profile);
-  const known = draft.knownTopics.split(/[，,、]/).map((item) => item.trim()).filter(Boolean);
-  return (
-    <section className="page page-view">
-      <div className="page-title"><div><span className="eyebrow">LEARNING PROFILE</span><h1>{copy[language].profile}</h1><p>{language === "zh" ? "越准确，Mira 越知道什么值得替你留下。" : "The more accurate this is, the better Mira filters."}</p></div><button className="primary-button" onClick={() => onSave(draft)}>{language === "zh" ? "保存修改" : "Save changes"}</button></div>
-      <div className="profile-grid">
-        <article className="profile-identity"><div className="avatar-large">NC</div><h2>Nan Cheng</h2><p>{language === "zh" ? "产品学习者 · 上海" : "Product learner · Shanghai"}</p><div className="profile-complete"><span>{language === "zh" ? "画像完整度" : "Profile completeness"}</span><strong>86%</strong></div><div className="progress"><i style={{ width: "86%" }} /></div><div className="mascot-message"><img src="/mascot.png" alt="" /><p>{language === "zh" ? "这些信息会直接影响 Mira 为你保留哪些片段。" : "These fields directly change what Mira keeps."}</p></div></article>
-        <div className="profile-content">
-          <article className="form-panel"><div className="panel-title"><div><h2>{language === "zh" ? "当前方向" : "Current direction"}</h2><p>{language === "zh" ? "Mira 会优先寻找能推动这个方向的内容。" : "Mira prioritizes content that moves this forward."}</p></div></div><input className="profile-input" value={draft.direction} onChange={(event) => setDraft({ ...draft, direction: event.target.value })} /><div className="goal-list"><div><span className="goal-icon green">01</span><div><strong>{draft.direction || "Agent 产品与交互设计"}</strong><p>{language === "zh" ? "当前主要学习方向" : "Primary learning direction"}</p></div><b>{language === "zh" ? "主要" : "Primary"}</b></div><div><span className="goal-icon navy">02</span><div><strong>{language === "zh" ? "当前水平" : "Current level"}</strong><input className="inline-profile-input" value={draft.level} onChange={(event) => setDraft({ ...draft, level: event.target.value })} /></div><b>{language === "zh" ? "进阶中" : "Growing"}</b></div></div></article>
-          <div className="profile-split">
-            <article className="form-panel"><div className="panel-title"><div><h2>{language === "zh" ? "正在做的项目" : "Current project"}</h2><p>{language === "zh" ? "决定什么内容算“现在有用”。" : "Defines what is useful right now."}</p></div></div><textarea className="profile-textarea" value={draft.project} onChange={(event) => setDraft({ ...draft, project: event.target.value })} /></article>
-            <article className="form-panel"><div className="panel-title"><div><h2>{language === "zh" ? "内容偏好" : "Content preferences"}</h2><p>{language === "zh" ? "用自然语言告诉 Mira 你的筛选标准。" : "Tell Mira how to filter."}</p></div></div><textarea className="profile-textarea" value={draft.preferences} onChange={(event) => setDraft({ ...draft, preferences: event.target.value })} /></article>
-          </div>
-          <article className="form-panel"><div className="panel-title"><div><h2>{language === "zh" ? "已掌握主题" : "Known topics"}</h2><p>{language === "zh" ? "重复出现时，Mira 会直接提醒你。" : "Mira flags repeated material."}</p></div></div><textarea className="profile-textarea compact" value={draft.knownTopics} onChange={(event) => setDraft({ ...draft, knownTopics: event.target.value })} /><div className="skill-cloud">{known.map((item) => <span key={item}>{item}<b>{language === "zh" ? "熟悉" : "Known"}</b></span>)}</div></article>
-        </div>
       </div>
     </section>
   );
@@ -642,16 +1101,37 @@ function ProfileView({ language, profile, onSave }: { language: Language; profil
 
 function SettingsView({
   language,
+  knowledgeCount,
+  autoCreateNote,
+  autoDiscoverVideos,
+  autoAnalyzeDiscoveries,
+  titleMode,
   canRestore,
+  onAutoCreateNoteChange,
+  onTitleModeChange,
+  onDiscoverySettingsChange,
+  onDiscoverNow,
   onBlank,
   onRestore,
 }: {
   language: Language;
+  knowledgeCount: number;
+  autoCreateNote: boolean;
+  autoDiscoverVideos: boolean;
+  autoAnalyzeDiscoveries: boolean;
+  titleMode: WorkspaceSettings["titleMode"];
   canRestore: boolean;
+  onAutoCreateNoteChange: (autoCreateNote: boolean) => Promise<void>;
+  onTitleModeChange: (titleMode: WorkspaceSettings["titleMode"]) => Promise<void>;
+  onDiscoverySettingsChange: (next: Partial<Pick<WorkspaceSettings, "autoDiscoverVideos" | "autoAnalyzeDiscoveries">>) => Promise<void>;
+  onDiscoverNow: () => Promise<void>;
   onBlank: () => Promise<void>;
   onRestore: () => Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
+  const [noteBusy, setNoteBusy] = useState(false);
+  const [titleBusy, setTitleBusy] = useState(false);
+  const [discoveryBusy, setDiscoveryBusy] = useState(false);
   const [error, setError] = useState("");
   const run = async (action: () => Promise<void>) => {
     setBusy(true);
@@ -676,11 +1156,49 @@ function SettingsView({
       </div>
 
       <div className="settings-grid">
+        <article className="settings-panel account-settings-panel">
+          <div className="settings-panel-head"><span className="settings-icon">匿</span><div><h2>{language === "zh" ? "个人信息" : "Personal information"}</h2><p>{language === "zh" ? "当前以匿名身份使用，个人入口与空间设置统一放在这里。" : "You are using an anonymous identity. Personal and workspace settings live here."}</p></div></div>
+          <div className="account-settings-list"><div><span>{language === "zh" ? "使用身份" : "Identity"}</span><strong>{language === "zh" ? "匿名用户" : "Anonymous user"}</strong></div><div><span>{language === "zh" ? "学习画像" : "Learning profile"}</span><strong>{language === "zh" ? `${knowledgeCount} 个知识节点` : `${knowledgeCount} knowledge nodes`}</strong></div><div><span>{language === "zh" ? "画像来源" : "Profile source"}</span><strong>{language === "zh" ? "由纳入书架的内容自动累计" : "Built automatically from shelved content"}</strong></div></div>
+        </article>
+
+        <article className="settings-panel">
+          <div className="settings-panel-head"><span className="settings-icon">Aa</span><div><h2>{language === "zh" ? "链接标题" : "Link titles"}</h2><p>{language === "zh" ? "决定标题留空时采用原内容标题，还是继续使用域名加内容类型。" : "Choose how untitled links are named."}</p></div></div>
+          <div className="title-mode-control" role="group" aria-label={language === "zh" ? "标题生成方式" : "Title mode"}>
+            <button type="button" className={titleMode === "automatic" ? "active" : ""} disabled={titleBusy} onClick={async () => { setTitleBusy(true); try { await onTitleModeChange("automatic"); } finally { setTitleBusy(false); } }}><strong>{language === "zh" ? "自动生成内容标题" : "Use content title"}</strong><span>{language === "zh" ? "分析后采用来源中的正式标题" : "Use the verified title after analysis"}</span></button>
+            <button type="button" className={titleMode === "source" ? "active" : ""} disabled={titleBusy} onClick={async () => { setTitleBusy(true); try { await onTitleModeChange("source"); } finally { setTitleBusy(false); } }}><strong>{language === "zh" ? "沿用当前方式" : "Keep current naming"}</strong><span>{language === "zh" ? "使用域名加视频、文章或论文" : "Use domain plus content type"}</span></button>
+          </div>
+          <p className="setting-help">{language === "zh" ? "手动填写的标题不会被覆盖；设置只影响之后提交且标题留空的链接。" : "Manually entered titles are never overwritten. This applies to future untitled links."}</p>
+        </article>
+
+        <article className="settings-panel">
+          <div className="settings-panel-head"><span className="settings-icon">✎</span><div><h2>{language === "zh" ? "笔记" : "Notes"}</h2><p>{language === "zh" ? "控制每次内容分析完成后是否自动整理一条可编辑笔记。" : "Choose whether completed analyses create an editable note automatically."}</p></div></div>
+          <label className="setting-toggle">
+            <div><strong>{language === "zh" ? "每次分析自动生成笔记" : "Create a note after every analysis"}</strong><p>{language === "zh" ? "笔记包含内容结论、精华内容、匹配度和内容含金量。" : "Notes include the verdict, highlights, personal match and content value."}</p></div>
+            <input type="checkbox" checked={autoCreateNote} disabled={noteBusy} onChange={async (event) => { setNoteBusy(true); try { await onAutoCreateNoteChange(event.target.checked); } catch (caught) { setError(caught instanceof Error ? caught.message : (language === "zh" ? "笔记设置保存失败" : "Could not save note settings.")); } finally { setNoteBusy(false); } }} />
+            <span aria-hidden="true" />
+          </label>
+        </article>
+
+        <article className="settings-panel discovery-settings-panel">
+          <div className="settings-panel-head"><span className="settings-icon">⌁</span><div><h2>{language === "zh" ? "自动发现" : "Automatic discovery"}</h2><p>{language === "zh" ? "根据已入架主题检索全网公开视频，每天最多生成 1 条候选推荐。" : "Search the public web from shelved topics and create at most one candidate per day."}</p></div></div>
+          <label className="setting-toggle">
+            <div><strong>{language === "zh" ? "自动发现候选视频" : "Discover candidate videos"}</strong><p>{language === "zh" ? "默认关闭；开启后由后台定时检索，候选不会自动进入书架。" : "Off by default. Background searches never add candidates to your shelf."}</p></div>
+            <input type="checkbox" checked={autoDiscoverVideos} disabled={discoveryBusy} onChange={async (event) => { setDiscoveryBusy(true); try { await onDiscoverySettingsChange({ autoDiscoverVideos: event.target.checked, ...(event.target.checked ? {} : { autoAnalyzeDiscoveries: false }) }); } catch (caught) { setError(caught instanceof Error ? caught.message : (language === "zh" ? "自动发现设置保存失败" : "Could not save discovery settings.")); } finally { setDiscoveryBusy(false); } }} />
+            <span aria-hidden="true" />
+          </label>
+          <label className="setting-toggle">
+            <div><strong>{language === "zh" ? "发现后自动分析" : "Analyze discoveries automatically"}</strong><p>{language === "zh" ? "开启后会消耗真实分析额度；关闭时只生成候选推荐。" : "Uses real analysis quota when on; otherwise only recommends candidates."}</p></div>
+            <input type="checkbox" checked={autoAnalyzeDiscoveries} disabled={discoveryBusy || !autoDiscoverVideos} onChange={async (event) => { setDiscoveryBusy(true); try { await onDiscoverySettingsChange({ autoAnalyzeDiscoveries: event.target.checked }); } catch (caught) { setError(caught instanceof Error ? caught.message : (language === "zh" ? "自动分析设置保存失败" : "Could not save automatic analysis settings.")); } finally { setDiscoveryBusy(false); } }} />
+            <span aria-hidden="true" />
+          </label>
+          <div className="discovery-settings-action"><span>{language === "zh" ? `当前兴趣来源：${knowledgeCount} 个书架知识节点` : `Interest source: ${knowledgeCount} shelf knowledge nodes`}</span><button className="outline-button" disabled={discoveryBusy || !autoDiscoverVideos || !knowledgeCount} onClick={async () => { setDiscoveryBusy(true); setError(""); try { await onDiscoverNow(); } catch (caught) { setError(caught instanceof Error ? caught.message : (language === "zh" ? "自动发现失败" : "Discovery failed.")); } finally { setDiscoveryBusy(false); } }}>{language === "zh" ? "立即发现一条" : "Discover now"}</button></div>
+        </article>
+
         <article className="settings-panel">
           <div className="settings-panel-head"><span className="settings-icon">◎</span><div><h2>{language === "zh" ? "数据说明" : "About your data"}</h2><p>{language === "zh" ? "页面不会把示例伪装成你的真实记录。" : "Examples are never presented as your real activity."}</p></div></div>
           <div className="data-truth-list">
             <div><i className="truth-dot live" /><div><strong>{language === "zh" ? "真实并持久化" : "Real and persisted"}</strong><p>{language === "zh" ? "会议、分析结果、taskId、时间码路线、稍后看状态、笔记、节省时间与知识更新，均来自你当前匿名会话并保存到 D1。" : "Talks, results, taskIds, routes, watch-later state, notes, saved time and knowledge updates come from this anonymous session and are stored in D1."}</p></div></div>
-            <div><i className="truth-dot template" /><div><strong>{language === "zh" ? "首次使用模板" : "First-use template"}</strong><p>{language === "zh" ? "个人画像的初始文字和技能树的路径结构是可编辑模板；技能树“最近更新”会在真实分析后使用你的知识更新。" : "Initial profile copy and the skill-path structure are editable templates. Recent skill updates use knowledge created by real analyses."}</p></div></div>
+            <div><i className="truth-dot template" /><div><strong>{language === "zh" ? "画像自动成长" : "Profile grows automatically"}</strong><p>{language === "zh" ? "新空间不预填学习画像。只有你确认纳入书架的内容，才会成为画像和技能树的累积依据。" : "New workspaces do not prefill a learning profile. Only content you add to the shelf shapes your profile and skill tree."}</p></div></div>
             <div><i className="truth-dot empty" /><div><strong>{language === "zh" ? "空状态就是空状态" : "Empty means empty"}</strong><p>{language === "zh" ? "没有真实任务时，首页、历史记录、稍后看和侧栏不会显示虚构会议。" : "Without a real task, Home, History, Watch later and the sidebar show no fictional talks."}</p></div></div>
           </div>
         </article>
@@ -689,7 +1207,7 @@ function SettingsView({
           <div className="settings-panel-head"><span className="settings-icon">□</span><div><h2>{language === "zh" ? "空白核验空间" : "Blank verification workspace"}</h2><p>{language === "zh" ? "从零走一遍流程，同时保留你现在的空间。" : "Walk through the product from zero without losing your current workspace."}</p></div></div>
           <ol className="verification-steps">
             <li><span>1</span><p>{language === "zh" ? "进入空白空间，确认首页与各列表没有写死数据。" : "Enter a blank workspace and verify that lists contain no hardcoded records."}</p></li>
-            <li><span>2</span><p>{language === "zh" ? "点击“添加会议”，粘贴一个公开且带字幕的视频链接。" : "Choose Add conference and paste a public video URL with captions."}</p></li>
+            <li><span>2</span><p>{language === "zh" ? "点击“添加内容”，选择视频、文章或论文并粘贴公开链接。" : "Choose Add content, select its type and paste a public URL."}</p></li>
             <li><span>3</span><p>{language === "zh" ? "完成真实分析后，核验 taskId、历史记录、技能更新与笔记。" : "After analysis, verify the taskId, History, skill updates and notes."}</p></li>
           </ol>
           <div className="workspace-action">
@@ -711,7 +1229,7 @@ function SettingsView({
 
       <article className="settings-panel settings-footnote">
         <div><span className="eyebrow">PRIVACY</span><h2>{language === "zh" ? "匿名免登录" : "Anonymous, no sign-in"}</h2></div>
-        <p>{language === "zh" ? "当前空间通过 HttpOnly 会话 Cookie 隔离。先鉴不保存原视频；分析后只保留结构化结果和你主动写下的笔记。" : "This workspace is isolated by an HttpOnly session cookie. Xianjian does not store source video; only structured results and notes you write are retained."}</p>
+        <p>{language === "zh" ? "当前空间通过 HttpOnly 会话 Cookie 隔离。未读先知不保存原媒体或原文副本；分析后只保留结构化结果和你主动写下的笔记。" : "This workspace is isolated by an HttpOnly session cookie. Source media and text copies are not stored; only structured results and notes are retained."}</p>
       </article>
     </section>
   );
@@ -719,50 +1237,106 @@ function SettingsView({
 
 function ProgressView({ language, analysis, onBack, onRetry }: { language: Language; analysis: Analysis; onBack: () => void; onRetry: () => void }) {
   const stopped = ["failed", "cancelled"].includes(analysis.status);
+  const contentLabel = contentTypeLabel(analysis.contentType, language);
   return (
-    <section className="page centered-page"><article className="progress-card"><div className={`agent-orb ${stopped ? "stopped" : ""}`}><img src="/mascot.png" alt="" />{!stopped && <i />}</div><span className="eyebrow">REAL AGENT TASK</span><h1>{stopped ? (language === "zh" ? "这次没有完成" : "This task did not finish") : (language === "zh" ? "Mira 正在替你先看" : "Mira is previewing it")}</h1><p>{analysis.progressText}</p><div className="task-facts"><div><span>{language === "zh" ? "视频" : "Video"}</span><strong>{analysis.title}</strong></div><div><span>{language === "zh" ? "任务状态" : "Status"}</span><strong>{analysis.status}</strong></div><div><span>taskId</span><code>{analysis.taskId || (language === "zh" ? "等待 InfiniSynapse 返回…" : "Waiting for InfiniSynapse…")}</code></div></div>{analysis.errorMessage && <div className="error-box">{analysis.errorMessage}</div>}<div className="button-row">{analysis.id && stopped && <button className="primary-button" onClick={onRetry}>{language === "zh" ? "尝试恢复" : "Recover"}</button>}<button className="secondary-button" onClick={onBack}>{language === "zh" ? "返回" : "Back"}</button></div><small>{language === "zh" ? "刷新不会丢失 taskId；任务可从历史记录继续恢复。" : "Refresh-safe: the task can be recovered from History."}</small></article></section>
+    <section className="page centered-page"><article className="progress-card"><div className={`agent-orb ${stopped ? "stopped" : ""}`}><img src="/mascot-v2.png" alt="" />{!stopped && <i />}</div><span className="eyebrow">REAL AGENT TASK</span><h1>{stopped ? (language === "zh" ? "这次没有完成" : "This task did not finish") : (language === "zh" ? "Mira 正在替你先读" : "Mira is reviewing it")}</h1><p>{analysis.progressText}</p><div className="task-facts"><div><span>{contentLabel}</span><strong>{analysis.title}</strong></div><div><span>{language === "zh" ? "任务状态" : "Status"}</span><strong>{analysis.status}</strong></div><div><span>taskId</span><code>{analysis.taskId || (language === "zh" ? "等待 InfiniSynapse 返回…" : "Waiting for InfiniSynapse…")}</code></div></div>{analysis.errorMessage && <div className="error-box">{analysis.errorMessage}</div>}<div className="button-row">{analysis.id && stopped && <button className="primary-button" onClick={onRetry}>{language === "zh" ? "尝试恢复" : "Recover"}</button>}<button className="secondary-button" onClick={onBack}>{language === "zh" ? "返回" : "Back"}</button></div><small>{language === "zh" ? "刷新不会丢失 taskId；任务可从历史记录继续恢复。" : "Refresh-safe: the task can be recovered from History."}</small></article></section>
   );
 }
 
-function DetailView({ language, analysis, onBack, onState, onNoteSaved }: { language: Language; analysis: Analysis; onBack: () => void; onState: (state: string) => void; onNoteSaved: () => void }) {
+function DetailView({ language, analysis, onBack, onState, onNoteSaved }: { language: Language; analysis: Analysis; onBack: () => void; onState: (state: string) => Promise<void>; onNoteSaved: () => void }) {
   const result = analysis.result!;
   const [noteFor, setNoteFor] = useState<string | null>(null);
   const [noteText, setNoteText] = useState("");
+  const [shelfBusy, setShelfBusy] = useState(false);
+  const [playError, setPlayError] = useState("");
+  const highlights = result.segments.filter((segment) => segment.decision === "watch").slice(0, 4);
+  const valueScore = contentValueScore(result);
+  const matchReason = result.signals.matchReason || (result.signals.match >= 45
+    ? "与当前学习方向有一定关联，建议按观看路线选择重点。"
+    : "与当前技能树关联较弱，可按个人兴趣决定是否保留。");
+  const valueReason = result.signals.valueReason || (valueScore >= 75
+    ? "信息密度、专业度和可信度较高，内容本身值得保留。"
+    : "内容有一定信息价值，但深度或原创性较为有限。");
+  const shelved = isOnShelf(analysis.meetingState);
+  const isVideo = analysis.contentType === "video";
+  const contentLabel = contentTypeLabel(analysis.contentType, language);
+  const changeShelf = async (state: string) => {
+    setShelfBusy(true);
+    try { await onState(state); }
+    finally { setShelfBusy(false); }
+  };
+  const openSegment = (segment: XianjianAnalysisResult["segments"][number]) => {
+    const contentUrl = analysis.contentUrl || analysis.videoUrl;
+    if (!contentUrl) {
+      setPlayError(language === "zh"
+        ? `这条记录没有保存原${contentLabel}链接，无法定位。请重新提交公开链接。`
+        : `This record has no source ${contentLabel.toLowerCase()} URL to locate.`);
+      return;
+    }
+    setPlayError("");
+    window.open(isVideo ? playbackUrl(contentUrl, segment.startSeconds) : contentLocatorUrl(contentUrl, segment), "_blank", "noopener,noreferrer");
+  };
   return (
     <section className="page page-view">
-      <div className="detail-top"><button className="back-button" onClick={onBack}>← {language === "zh" ? "返回" : "Back"}</button><div className="detail-actions"><button className="secondary-button" onClick={() => onState("later")}>{language === "zh" ? "加入稍后看" : "Watch later"}</button><button className="icon-button" onClick={() => onState("archived")}>•••</button></div></div>
-      <div className="detail-hero"><div className="detail-cover"><div className="cover-grid" /><span>{analysis.source.split(/[·｜|]/)[0].toUpperCase()}</span><small>PUBLIC VIDEO · ANALYZED</small><i>{timecode(result.totalDurationSeconds)}</i></div><div className="detail-copy"><span className="meta">{analysis.source}</span><h1>{analysis.title}</h1><p>{result.summary}</p><div className="speaker-row"><span className="speaker-avatar">M</span><div><strong>Mira · InfiniSynapse Agent</strong><small>{language === "zh" ? "已核验时间码与内容信号" : "Timestamps and signals verified"}</small></div></div></div><div className="verdict-card"><span className="verdict-label"><i />{language === "zh" ? "Mira 的结论" : "Mira's verdict"}</span><strong>{verdictLabel(result.verdict, language)}</strong><p>{language === "zh" ? `只看 ${result.segments.filter((segment) => segment.decision === "watch").length} 个片段，共 ${formatTime(result.recommendedSeconds)}。` : `${result.segments.filter((segment) => segment.decision === "watch").length} segments, ${formatTime(result.recommendedSeconds)}.`}</p><div><span>{language === "zh" ? "与你的匹配度" : "Match"}</span><b>{result.signals.match}%</b></div></div></div>
+      <div className="detail-top"><button className="back-button" onClick={onBack}>← {language === "zh" ? "返回" : "Back"}</button><div className="detail-actions">{shelved ? <><button className="secondary-button shelf-confirmed" disabled>✓ {language === "zh" ? "已在书架" : "On shelf"}</button><button className="icon-button" disabled={shelfBusy} onClick={() => changeShelf("archived")} aria-label={language === "zh" ? "移出书架" : "Remove from shelf"} title={language === "zh" ? "移出书架并同步技能树" : "Remove from shelf and sync skill tree"}>−</button></> : <><button className="primary-button" disabled={shelfBusy} onClick={() => changeShelf("shelved")}>＋ {language === "zh" ? "纳入书架" : "Add to shelf"}</button><button className="secondary-button" disabled={shelfBusy} onClick={() => changeShelf("archived")}>{language === "zh" ? "暂不纳入" : "Not now"}</button></>}</div></div>
+      <div className="detail-hero"><div className="detail-cover"><div className="cover-grid" /><span>{analysis.source.split(/[·｜|]/)[0].toUpperCase()}</span><small>PUBLIC {contentLabel.toUpperCase()} · ANALYZED</small>{isVideo ? <i>{timecode(result.totalDurationSeconds)}</i> : <i>{result.segments.length} 节</i>}</div><div className="detail-copy"><span className="meta">{analysis.source}</span><h1>{analysis.title}</h1><p>{result.summary}</p><div className="speaker-row"><span className="speaker-avatar">M</span><div><strong>Mira · InfiniSynapse Agent</strong><small>{language === "zh" ? (isVideo ? "已核验时间码与内容信号" : "已核验原文章节与内容信号") : (isVideo ? "Timestamps and signals verified" : "Sections and content signals verified")}</small></div></div></div><div className="verdict-card"><span className="verdict-label"><i />{language === "zh" ? "Mira 的结论" : "Mira's verdict"}</span><strong>{verdictLabel(result.verdict, language)}</strong><p>{language === "zh" ? (isVideo ? `只看 ${result.segments.filter((segment) => segment.decision === "watch").length} 个片段，共 ${formatTime(result.recommendedSeconds)}。` : `建议优先阅读 ${result.segments.filter((segment) => segment.decision === "watch").length} 个章节。`) : `${result.segments.filter((segment) => segment.decision === "watch").length} recommended sections.`}</p><div><span>{language === "zh" ? "与你的匹配度" : "Match"}</span><b>{result.signals.match}%</b></div></div></div>
       <div className="detail-body">
-        <article className="route-panel"><div className="section-head"><div><span className="eyebrow">YOUR WATCHING ROUTE</span><h2>{language === "zh" ? "你的观看路线" : "Your watching route"}</h2><p>{language === "zh" ? `完整视频 ${formatTime(result.totalDurationSeconds)}，只保留能推动当前项目的部分。` : `From ${formatTime(result.totalDurationSeconds)}, only keep what moves your project forward.`}</p></div><div className="time-saved"><span>{language === "zh" ? "预计节省" : "TIME SAVED"}</span><strong>{formatTime(result.savedSeconds)}</strong></div></div>
-          <div className="video-timeline"><div className="timeline-bar">{result.segments.map((segment) => <i key={segment.id} className={`dynamic-segment ${segment.decision}`} style={{ left: `${(segment.startSeconds / result.totalDurationSeconds) * 100}%`, width: `${Math.max(1, ((segment.endSeconds - segment.startSeconds) / result.totalDurationSeconds) * 100)}%` }} />)}</div><div className="timeline-labels"><span>00:00</span><span>{timecode(result.totalDurationSeconds / 4)}</span><span>{timecode(result.totalDurationSeconds / 2)}</span><span>{timecode(result.totalDurationSeconds * 0.75)}</span><span>{timecode(result.totalDurationSeconds)}</span></div></div>
+        <article className="route-panel"><div className="section-head"><div><span className="eyebrow">{isVideo ? "YOUR WATCHING ROUTE" : "YOUR READING ROUTE"}</span><h2>{language === "zh" ? (isVideo ? "你的观看路线" : "你的阅读路线") : (isVideo ? "Your watching route" : "Your reading route")}</h2><p>{language === "zh" ? (isVideo ? `完整视频 ${formatTime(result.totalDurationSeconds)}，只保留能推动当前项目的部分。` : "按原文章节定位，先读最能推动当前项目的部分。") : (isVideo ? `From ${formatTime(result.totalDurationSeconds)}, only keep what moves your project forward.` : "Jump directly to the sections that move your current project forward.")}</p></div>{isVideo && <div className="time-saved"><span>{language === "zh" ? "预计节省" : "TIME SAVED"}</span><strong>{formatTime(result.savedSeconds)}</strong></div>}</div>
+          {isVideo && <div className="video-timeline"><div className="timeline-bar">{result.segments.map((segment) => <i key={segment.id} className={`dynamic-segment ${segment.decision}`} style={{ left: `${(segment.startSeconds / result.totalDurationSeconds) * 100}%`, width: `${Math.max(1, ((segment.endSeconds - segment.startSeconds) / result.totalDurationSeconds) * 100)}%` }} />)}</div><div className="timeline-labels"><span>00:00</span><span>{timecode(result.totalDurationSeconds / 4)}</span><span>{timecode(result.totalDurationSeconds / 2)}</span><span>{timecode(result.totalDurationSeconds * 0.75)}</span><span>{timecode(result.totalDurationSeconds)}</span></div></div>}
+          {playError && <div className="playback-error">{playError}</div>}
           <div className="route-list">{result.segments.map((segment) => (
-            <div className={`route-item ${segment.decision === "watch" ? "active" : ""}`} key={segment.id}><span className="play">▶</span><div><span>{timecode(segment.startSeconds)} — {timecode(segment.endSeconds)} · {formatTime(segment.endSeconds - segment.startSeconds)}</span><strong>{segment.title}</strong><p>{segment.value}</p><div className="tag-row">{segment.tags.map((tag) => <span key={tag}>{tag}</span>)}</div>{noteFor === segment.id ? <div className="inline-note"><textarea value={noteText} onChange={(event) => setNoteText(event.target.value)} placeholder={language === "zh" ? "记录这个时间码…" : "Write a timestamp note…"} /><button className="primary-button" onClick={async () => { if (!noteText.trim()) return; await api("/api/notes", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ meetingId: analysis.meetingId, segmentId: segment.id, timecodeSeconds: segment.startSeconds, content: noteText }) }); setNoteFor(null); setNoteText(""); onNoteSaved(); }}>{language === "zh" ? "保存" : "Save"}</button></div> : <button className="note-button" onClick={() => setNoteFor(segment.id)}>＋ {language === "zh" ? "记时间码笔记" : "Timestamp note"}</button>}</div><b>{segment.decision === "watch" ? (language === "zh" ? "现在看" : "Watch") : (language === "zh" ? "可跳过" : "Skip")}</b></div>
+            <div className={`route-item ${segment.decision === "watch" ? "active" : ""}`} key={segment.id}>
+              <button className="play" onClick={() => openSegment(segment)} aria-label={isVideo ? (language === "zh" ? `从 ${timecode(segment.startSeconds)} 播放` : `Play from ${timecode(segment.startSeconds)}`) : (language === "zh" ? "定位原文" : "Locate source text")} title={analysis.contentUrl || analysis.videoUrl ? (isVideo ? (language === "zh" ? "打开原视频并定位到此时间码" : "Open the source video at this timestamp") : (language === "zh" ? "定位原文章节" : "Locate this section in the source")) : (language === "zh" ? "缺少原文链接" : "Source URL unavailable")}>{isVideo ? "▶" : "⌖"}</button>
+              <div className="route-copy">
+                <div className="route-meta">
+                  <span>{isVideo ? `${timecode(segment.startSeconds)} — ${timecode(segment.endSeconds)} · ${formatTime(segment.endSeconds - segment.startSeconds)}` : (segment.locator?.pageNumber ? `第 ${segment.locator.pageNumber} 页` : segment.locator?.heading || `第 ${segment.startSeconds + 1} 节`)}</span>
+                  <b className="route-decision">{segment.decision === "watch" ? (language === "zh" ? "现在看" : "Watch") : (language === "zh" ? "可跳过" : "Skip")}</b>
+                </div>
+                <strong>{segment.title}</strong>
+                <p>{segment.value}</p>
+                <div className="tag-row">{segment.tags.map((tag) => <span key={tag}>{tag}</span>)}</div>
+                {noteFor === segment.id
+                  ? <div className="inline-note"><textarea value={noteText} onChange={(event) => setNoteText(event.target.value)} placeholder={language === "zh" ? (isVideo ? "记录这个时间码…" : "记录这个章节…") : "Write a note…"} /><button className="primary-button" onClick={async () => { if (!noteText.trim()) return; await api("/api/notes", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ meetingId: analysis.meetingId, segmentId: segment.id, timecodeSeconds: isVideo ? segment.startSeconds : null, content: noteText }) }); setNoteFor(null); setNoteText(""); onNoteSaved(); }}>{language === "zh" ? "保存" : "Save"}</button></div>
+                  : <button className="note-button" onClick={() => setNoteFor(segment.id)}>＋ {language === "zh" ? (isVideo ? "记时间码笔记" : "记章节笔记") : "Add note"}</button>}
+              </div>
+            </div>
           ))}</div>
         </article>
-        <aside className="detail-aside"><article className="why-card"><h3>{language === "zh" ? "你会得到什么" : "What you'll get"}</h3><ul>{result.evidence.slice(0, 4).map((item) => <li key={item}><i /><span>{item}</span></li>)}</ul></article><article className="signal-card">{[[language === "zh" ? "匹配度" : "Match", result.signals.match], [language === "zh" ? "技术深度" : "Depth", result.signals.depth], [language === "zh" ? "营销内容" : "Promotion", result.signals.promotion], [language === "zh" ? "重复内容" : "Repetition", result.signals.repetition]].map(([label, value]) => <div key={String(label)}><span>{label}</span><b>{value}%</b></div>)}</article><article className="memory-card"><div className="memory-title"><img src="/mascot.png" alt="" /><div><strong>{language === "zh" ? "看完会记住" : "Saved to memory"}</strong><p>{language === "zh" ? "自动进入你的学习记录" : "Added to your learning record"}</p></div></div><span>{result.newKnowledge.map((item) => item.topic).join(" / ") || "Agent / Evaluation"}</span></article><article className="task-card"><span>InfiniSynapse taskId</span><code>{analysis.taskId}</code></article></aside>
+        <aside className="detail-aside">
+          <article className="why-card highlight-card"><div className="aside-heading"><div><span className="eyebrow">HIGHLIGHTS</span><h3>{language === "zh" ? "精华内容" : "Highlights"}</h3></div><b>{highlights.length}</b></div><ul>{highlights.map((item) => <li key={item.id}><i /><span><strong>{item.title}</strong><small>{item.value}</small></span></li>)}</ul></article>
+          <article className="score-card"><div className="score-block match-score"><div><span>{language === "zh" ? "与你的匹配度" : "Personal match"}</span><em>{scoreBand(result.signals.match, language)}</em></div><strong>{result.signals.match}<small>%</small></strong><p>{matchReason}</p><i><b style={{ width: `${result.signals.match}%` }} /></i></div><div className="score-block value-score"><div><span>{language === "zh" ? "内容含金量" : "Content value"}</span><em>{scoreBand(valueScore, language)}</em></div><strong>{valueScore}<small>%</small></strong><p>{valueReason}</p><i><b style={{ width: `${valueScore}%` }} /></i></div><div className="score-details">{[[language === "zh" ? "专业深度" : "Depth", result.signals.depth], [language === "zh" ? "来源可信" : "Reliability", result.signals.sourceReliability], [language === "zh" ? "推广占比" : "Promotion", result.signals.promotion]].map(([label, value]) => <div key={String(label)}><span>{label}</span><b>{value}%</b></div>)}</div></article>
+          <article className={`shelf-decision-card ${shelved ? "is-shelved" : ""}`}><div className="memory-title"><img src="/mascot-v2.png" alt="" /><div><strong>{shelved ? (language === "zh" ? "已同步到技能树" : "Skill tree updated") : (language === "zh" ? "是否值得进入你的知识体系？" : "Add this to your knowledge system?")}</strong><p>{shelved ? (language === "zh" ? "移出书架时会同步撤回" : "Removing it also reverts the update") : (language === "zh" ? "由你确认，不会自动替你做决定" : "You decide; nothing is added automatically")}</p></div></div><span>{result.newKnowledge.map((item) => item.topic).join(" / ") || (language === "zh" ? "暂无新增技能节点" : "No new skill nodes")}</span>{!shelved && <button className="primary-button" disabled={shelfBusy} onClick={() => changeShelf("shelved")}>{language === "zh" ? "纳入书架并更新技能树" : "Add to shelf and update skill tree"}</button>}</article>
+          <article className="task-card"><span>InfiniSynapse taskId</span><code>{analysis.taskId}</code></article>
+        </aside>
       </div>
     </section>
   );
 }
 
-function AddMeeting({ language, demo, profile, onClose, onStart, notify }: { language: Language; demo: DemoPayload; profile: LearningProfile; onClose: () => void; onStart: (input: { videoUrl?: string; title?: string; source?: string; transcript?: string; selectedProfile?: LearningProfile }) => void; notify: (message: string) => void }) {
-  const [videoUrl, setVideoUrl] = useState("");
+function AddMeeting({ language, demo, onClose, onStart, notify }: { language: Language; demo: DemoPayload | null; onClose: () => void; onStart: (input: { contentType?: ContentType; contentUrl?: string; videoUrl?: string; title?: string; source?: string; transcript?: string }) => void; notify: (message: string) => void }) {
+  const [contentType, setContentType] = useState<ContentType>("video");
+  const [contentUrl, setContentUrl] = useState("");
   const [title, setTitle] = useState("");
   const [advanced, setAdvanced] = useState(false);
   const [transcript, setTranscript] = useState("");
-  const validUrl = /^https?:\/\/\S+/i.test(videoUrl.trim());
+  const validUrl = /^https?:\/\/\S+/i.test(contentUrl.trim());
+  const typeLabel = contentTypeLabel(contentType, language);
+  const sourceHint = contentType === "video"
+    ? (language === "zh" ? "支持公开的 YouTube、Bilibili、Vimeo 与其他可访问视频页面；必须有字幕、文字稿或章节时间码。" : "Supports public video pages with captions, transcript or chapters.")
+    : (language === "zh" ? "支持公开可访问的文章、网页与 PDF 论文链接；Mira 会标出可直接回到原文的章节。" : "Use a public article, web page or PDF. Mira returns locatable source sections.");
   return (
     <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <section className="modal video-link-modal" role="dialog" aria-modal="true" aria-labelledby="add-title">
-        <div className="modal-head"><div><span className="eyebrow">NEW ANALYSIS</span><h2 id="add-title">{language === "zh" ? "粘贴视频链接，Mira 替你先看" : "Paste a video link. Mira previews it."}</h2><p>{language === "zh" ? "不需要下载视频，也不需要自己找字幕。公开可访问且带字幕的视频即可分析。" : "No download and no transcript hunting. Use a public video with captions."}</p></div><button className="close-button" onClick={onClose} aria-label="关闭">×</button></div>
+        <div className="modal-head"><div><span className="eyebrow">NEW ANALYSIS</span><h2 id="add-title">{language === "zh" ? "提交内容，Mira 替你先读" : "Share content. Mira reviews it first."}</h2><p>{language === "zh" ? "公开视频、文章和论文都可以分析。结果会保留可回到原内容的关键位置。" : "Analyze public videos, articles and papers with links back to key source locations."}</p></div><button className="close-button" onClick={onClose} aria-label="关闭">×</button></div>
         <div className="link-hero">
-          <label><span>{language === "zh" ? "视频链接" : "Video URL"}</span><div className="url-input-wrap"><span>↗</span><input value={videoUrl} onChange={(event) => setVideoUrl(event.target.value)} placeholder="https://www.youtube.com/watch?v=… / https://www.bilibili.com/video/…" autoFocus /></div><small>{language === "zh" ? "支持公开的 YouTube、Bilibili、Vimeo 与其他可访问视频页面；必须有字幕、文字稿或章节时间码。" : "Supports public YouTube, Bilibili, Vimeo and other accessible video pages with captions, transcript or chapters."}</small></label>
+          <div className="content-type-control" role="group" aria-label={language === "zh" ? "内容类型" : "Content type"}>{(["video", "article", "paper"] as ContentType[]).map((type) => <button key={type} type="button" className={contentType === type ? "active" : ""} onClick={() => { setContentType(type); setAdvanced(false); }}>{contentTypeLabel(type, language)}</button>)}</div>
+          <label><span>{language === "zh" ? `${typeLabel}链接` : `${typeLabel} URL`}</span><div className="url-input-wrap"><span>↗</span><input value={contentUrl} onChange={(event) => setContentUrl(event.target.value)} placeholder={contentType === "video" ? "https://www.youtube.com/watch?v=… / https://www.bilibili.com/video/…" : contentType === "paper" ? "https://arxiv.org/pdf/… / https://example.com/paper.pdf" : "https://example.com/article"} autoFocus /></div><small>{sourceHint}</small></label>
           <label><span>{language === "zh" ? "标题（选填）" : "Title (optional)"}</span><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder={language === "zh" ? "留空时根据链接自动命名" : "Auto-named from the URL when empty"} /></label>
         </div>
-        <button className="advanced-toggle" onClick={() => setAdvanced((open) => !open)}>{advanced ? "−" : "＋"} {language === "zh" ? "高级输入：我已经有字幕" : "Advanced: I already have captions"}</button>
-        {advanced && <div className="advanced-panel"><textarea value={transcript} onChange={(event) => setTranscript(event.target.value)} placeholder={language === "zh" ? "粘贴带时间码的 SRT / VTT / TXT…" : "Paste timestamped SRT / VTT / TXT…"} maxLength={80000} /><div><button className="text-button" onClick={() => { setTranscript(demo.demo.transcript); setTitle(demo.demo.title); setVideoUrl(""); notify(language === "zh" ? "已载入内置示例" : "Demo loaded"); }}>{language === "zh" ? "载入内置示例" : "Load demo"}</button><span>{transcript.length.toLocaleString()} / 80,000</span></div></div>}
-        <div className="privacy-strip"><img src="/mascot.png" alt="" /><div><strong>{language === "zh" ? "只分析，不保存视频" : "Analyze only. Video is not stored."}</strong><p>{language === "zh" ? "链接只用于本次任务；分析完成后保留结构化结果、时间码路线和你的笔记。" : "Only the result, timestamp route and notes are retained."}</p></div></div>
-        <div className="modal-footer"><p>{language === "zh" ? "真实分析会消耗 1 次今日额度，并生成可核验 taskId。" : "Uses one daily analysis and creates a verifiable taskId."}</p><button className="secondary-button" onClick={onClose}>{language === "zh" ? "取消" : "Cancel"}</button><button className="primary-button" disabled={advanced ? transcript.trim().length < 500 : !validUrl} onClick={() => advanced ? onStart({ title: title || demo.demo.title, source: "字幕输入", transcript, selectedProfile: profile }) : onStart({ videoUrl, title, selectedProfile: profile })}>{language === "zh" ? "开始真实分析" : "Start real analysis"} →</button></div>
+        <button className="advanced-toggle" onClick={() => setAdvanced((open) => !open)}>{advanced ? "−" : "＋"} {language === "zh" ? (contentType === "video" ? "高级输入：我已经有字幕" : "高级输入：我已经有原文") : "Advanced: paste source text"}</button>
+        {advanced && <div className="advanced-panel"><textarea value={transcript} onChange={(event) => setTranscript(event.target.value)} placeholder={language === "zh" ? (contentType === "video" ? "粘贴带时间码的 SRT / VTT / TXT…" : "粘贴文章或论文正文…") : "Paste source text…"} maxLength={80000} /><div>{contentType === "video" && demo && <button className="text-button" onClick={() => { setTranscript(demo.demo.transcript); setTitle(demo.demo.title); setContentUrl(""); notify(language === "zh" ? "已载入内置示例" : "Demo loaded"); }}>{language === "zh" ? "载入内置示例" : "Load demo"}</button>}<span>{transcript.length.toLocaleString()} / 80,000</span></div></div>}
+        <div className="privacy-strip"><img src="/mascot-v2.png" alt="" /><div><strong>{language === "zh" ? "只分析，不保存原内容" : "Analyze only. Source media is not stored."}</strong><p>{language === "zh" ? "链接只用于本次任务；分析完成后保留结构化结果、阅读或观看路线和你的笔记。" : "Only the result, route and notes are retained."}</p></div></div>
+        <div className="modal-footer"><p>{language === "zh" ? "真实分析会消耗 1 次今日额度，并生成可核验 taskId。" : "Uses one daily analysis and creates a verifiable taskId."}</p><button className="secondary-button" onClick={onClose}>{language === "zh" ? "取消" : "Cancel"}</button><button className="primary-button" disabled={advanced ? transcript.trim().length < 500 : !validUrl} onClick={() => { notify(language === "zh" ? "任务已提交，正在加入运行列表" : "Task submitted and added to the running list"); advanced ? onStart({ contentType, title, source: `${typeLabel}文本`, transcript }) : onStart({ contentType, contentUrl, title }); }}>{language === "zh" ? "开始真实分析" : "Start real analysis"} →</button></div>
       </section>
     </div>
   );

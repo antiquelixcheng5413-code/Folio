@@ -20,15 +20,18 @@ export async function GET(request: Request) {
       .prepare(`SELECT k.id, k.meeting_id AS meetingId, k.analysis_id AS analysisId,
         k.topic, k.status, k.evidence, k.created_at AS createdAt, m.title
         FROM knowledge_items k JOIN meetings m ON m.id = k.meeting_id
-        WHERE k.session_id = ? ORDER BY k.created_at DESC LIMIT 100`)
+        WHERE k.session_id = ?
+        AND m.state IN ('shelved', 'later', 'completed')
+        ORDER BY k.created_at DESC LIMIT 100`)
       .bind(session.sessionId)
       .all();
     return json({ view, items: rows.results }, {}, session.cookie);
   }
   const rows = await db
-    .prepare(`SELECT m.id, m.title, m.source, m.duration_seconds AS durationSeconds,
+    .prepare(`SELECT m.id, m.title, m.source, m.content_type AS contentType,
+      m.video_url AS contentUrl, m.video_url AS videoUrl, m.duration_seconds AS durationSeconds,
       m.state, m.created_at AS createdAt, a.id AS analysisId, a.status,
-      a.task_id AS taskId, a.result_json AS resultJson,
+      a.progress_text AS progressText, a.task_id AS taskId, a.result_json AS resultJson,
       (SELECT COUNT(*) FROM notes n WHERE n.meeting_id = m.id AND n.session_id = ?) AS noteCount
       FROM meetings m
       LEFT JOIN analyses a ON a.id = (

@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import type {
   AnalysisSegment,
+  ContentType,
   LearningProfile,
   XianjianAnalysisResult,
 } from "./types";
@@ -19,6 +20,7 @@ type RunOptions = {
   meetingTitle: string;
   profile: LearningProfile;
   durationSeconds: number;
+  contentType?: ContentType;
   onProgress: (update: ProgressUpdate) => Promise<void> | void;
 };
 
@@ -83,46 +85,76 @@ async function apiJson<T>(path: string, init: RequestInit = {}) {
 
 function buildPrompt(options: RunOptions) {
   const { profile, meetingTitle, transcript, durationSeconds } = options;
-  const videoUrl = transcript.startsWith("VIDEO_URL:")
-    ? transcript.slice("VIDEO_URL:".length).trim()
-    : "";
-  const contentInstruction = videoUrl
-    ? `公开视频链接：${videoUrl}
+  const contentType = options.contentType || "video";
+  const markerMatch = transcript.match(/^(VIDEO|ARTICLE|PAPER)_URL:([\s\S]+)$/);
+  const sourceUrl = markerMatch?.[2]?.trim() || "";
+  const typeLabel = contentType === "video" ? "视频" : contentType === "paper" ? "论文" : "文章";
+  const contentInstruction = sourceUrl
+    ? contentType === "video"
+      ? `公开视频链接：${sourceUrl}
 
 请先打开该公开视频页面，读取页面提供的字幕、章节、转录或其他可核验的时间码内容。若页面有“显示文字稿 / transcript / 字幕”入口，请使用它。仅根据实际读取到的内容分析，禁止凭标题编造。无法访问或没有任何可核验字幕/章节时，请明确返回错误，不要伪造片段。`
-    : `字幕估算总时长：${durationSeconds} 秒
+      : `公开${typeLabel}链接：${sourceUrl}
+
+请打开原文并阅读全文，只根据实际可见的正文、标题层级和页码分析，禁止凭标题或摘要编造。每个阅读片段必须提供原文中的准确小标题 heading 和一段可检索的短原句 quote；PDF 论文能确认页码时还要提供 pageNumber。无法访问正文时请明确返回错误，不要伪造章节、引文或页码。`
+    : contentType === "video"
+      ? `字幕估算总时长：${durationSeconds} 秒
 
 字幕开始：
 ${transcript}
-字幕结束。`;
-  return `你是“先鉴”的会议内容价值分析 Agent。你必须基于用户画像逐段分析内容，禁止编造来源中不存在的信息。
+字幕结束。`
+      : `${typeLabel}正文开始：
+${transcript}
+${typeLabel}正文结束。请用原文小标题和短引文标记每个阅读片段。`;
+  const segmentRequirement = contentType === "video"
+    ? "提供至少 3 个、最多 7 个有效时间码片段；每段必须来自可核验的字幕、章节或转录时间码，startSeconds < endSeconds。"
+    : "提供至少 3 个、最多 7 个阅读片段；按原文顺序排列，每段必须包含 locator.heading 和可在原文检索的 locator.quote；PDF 能确认页码时填写 locator.pageNumber。startSeconds/endSeconds 仅按 0-1、1-2 的章节顺序填写。";
+  const segmentEvidence = contentType === "video"
+    ? "每个片段标记 watch 或 skip，并说明对该用户的具体价值和字幕证据。"
+    : "每个片段标记 watch 或 skip，并用通俗中文说明该章节讲了什么、为何值得读或可跳过。";
+  return `你是“未读先知”的内容价值分析 Agent。你必须基于用户画像逐段分析${typeLabel}，禁止编造来源中不存在的信息。
 
-用户画像：
+自动学习画像（由用户已纳入书架的内容持续累计，不要求用户手填）：
 - 方向：${profile.direction}
 - 当前水平：${profile.level}
 - 正在做的项目：${profile.project}
 - 已掌握主题：${profile.knownTopics}
 - 内容偏好：${profile.preferences}
 
-会议标题：${meetingTitle}
+内容标题：${meetingTitle}
 ${contentInstruction}
 
 任务：
 1. 判断整场内容对该用户是值得看、选择性看，还是跳过。
-2. 提供至少 3 个、最多 7 个有效时间码片段；每段必须来自可核验的字幕、章节或转录时间码，startSeconds < endSeconds。
-3. 每个片段标记 watch 或 skip，并说明对该用户的具体价值和字幕证据。
+   若这是第一次分析、画像尚未形成，匹配度应取中性值并说明“暂无足够历史”，不要把未知误判为高匹配或低匹配；含金量仍须独立正常评价。
+2. ${segmentRequirement}
+3. ${segmentEvidence}
 4. 区分新增知识与用户已掌握/重复知识。
-5. 从匹配度、技术深度、推广含量、重复度、来源可靠度五个维度给出 0-100 分。
+5. 将“匹配度”和“含金量”严格分开评分：
+   - 匹配度只衡量内容与用户当前方向、项目和技能树的相关程度。内容制作再精良，只要与用户目标无关，匹配度就应低。
+   - 含金量不受用户画像影响，独立衡量信息密度、专业制作、原创洞察、可验证性与内容完整度。与用户目标不匹配的优质内容仍可获得高含金量。
+   - 同时给出技术深度、推广含量、重复度、来源可靠度，所有分数均为 0-100。
 6. 在任务工作区写入文件 xianjian-result.json。最终回复也只输出同一份 JSON，不要 Markdown，不要解释。
+
+表达要求：
+- 所有用户可见文字使用简洁中文，直接说内容讲了什么、为什么有价值，避免出现 API、抓取过程、网站域名、工具调用和数据获取过程。
+- summary 必须先说明内容本身好不好，再说明是否适合当前用户，不超过 60 字。
+- evidence 必须是 2-4 条可独立理解的内容精华，每条写成完整句子，不要罗列来源元数据。
+- matchReason 和 valueReason 各用一句通俗中文解释评分依据，不超过 45 字。
+- contentTitle 填写来源页面或原内容中实际出现的正式标题；无法确认时留空，禁止根据主题自行编造。
 
 JSON 必须严格符合以下结构：
 {
   "schemaVersion": "xianjian.v1",
+  "contentTitle": "来源中实际出现的正式标题",
   "verdict": "worth | selective | skip",
   "summary": "一句话结论",
   "evidence": ["依据1", "依据2"],
   "signals": {
     "match": 0,
+    "matchReason": "为什么与当前用户匹配或不匹配",
+    "value": 0,
+    "valueReason": "为什么内容本身含金量高或低",
     "depth": 0,
     "promotion": 0,
     "repetition": 0,
@@ -136,7 +168,12 @@ JSON 必须严格符合以下结构：
     "title": "片段标题",
     "value": "为什么对该用户有用或无用",
     "evidence": "字幕中的具体依据",
-    "tags": ["主题"]
+    "tags": ["主题"],
+    "locator": {
+      "heading": "文章或论文的小标题；视频留空",
+      "quote": "可在原文中检索的短原句；视频留空",
+      "pageNumber": 1
+    }
   }],
   "newKnowledge": [{"topic": "主题", "evidence": "依据"}],
   "repeatedKnowledge": [{"topic": "主题", "evidence": "依据"}]
@@ -210,14 +247,51 @@ function score(value: unknown) {
   return Math.max(0, Math.min(100, Math.round(number)));
 }
 
-function normalizeSegment(value: unknown, index: number): AnalysisSegment | null {
+function valueScore(signals: Record<string, unknown>) {
+  if (signals.value !== undefined) return score(signals.value);
+  return Math.round(
+    score(signals.depth) * 0.35 +
+      score(signals.sourceReliability) * 0.35 +
+      (100 - score(signals.promotion)) * 0.15 +
+      (100 - score(signals.repetition)) * 0.15
+  );
+}
+
+function scoreReason(kind: "match" | "value", value: number) {
+  if (kind === "match") {
+    if (value >= 75) return "与当前学习方向和项目高度相关，可以直接吸收使用。";
+    if (value >= 45) return "与当前方向部分相关，建议只看标出的关键片段。";
+    return "内容与当前技能树关联较弱，可按兴趣决定是否保留。";
+  }
+  if (value >= 75) return "信息密度、专业度和可信度较高，内容本身值得保留。";
+  if (value >= 45) return "有可用信息，但深度或原创性一般，适合选择性观看。";
+  return "有效信息较少或重复、推广较多，整体含金量有限。";
+}
+
+function normalizeSegment(
+  value: unknown,
+  index: number,
+  contentType: ContentType
+): AnalysisSegment | null {
   if (!value || typeof value !== "object") return null;
   const item = value as Record<string, unknown>;
-  const startSeconds = Math.max(0, Math.round(Number(item.startSeconds)));
-  const endSeconds = Math.max(0, Math.round(Number(item.endSeconds)));
-  if (!Number.isFinite(startSeconds) || !Number.isFinite(endSeconds) || endSeconds <= startSeconds) {
+  const rawStart = Math.round(Number(item.startSeconds));
+  const rawEnd = Math.round(Number(item.endSeconds));
+  if (
+    contentType === "video" &&
+    (!Number.isFinite(rawStart) || !Number.isFinite(rawEnd) || rawEnd <= rawStart)
+  ) {
     return null;
   }
+  const startSeconds = contentType === "video" ? Math.max(0, rawStart) : index;
+  const endSeconds = contentType === "video" ? Math.max(0, rawEnd) : index + 1;
+  const rawLocator = item.locator && typeof item.locator === "object"
+    ? item.locator as Record<string, unknown>
+    : {};
+  const heading = String(rawLocator.heading || "").trim();
+  const quote = String(rawLocator.quote || "").trim();
+  const rawPage = Number(rawLocator.pageNumber);
+  const pageNumber = Number.isFinite(rawPage) && rawPage > 0 ? Math.round(rawPage) : undefined;
   return {
     id: String(item.id || `seg-${index + 1}`),
     startSeconds,
@@ -227,6 +301,9 @@ function normalizeSegment(value: unknown, index: number): AnalysisSegment | null
     value: String(item.value || ""),
     evidence: String(item.evidence || ""),
     tags: Array.isArray(item.tags) ? item.tags.map(String).slice(0, 6) : [],
+    ...(contentType === "video" || (!heading && !quote && !pageNumber)
+      ? {}
+      : { locator: { ...(heading ? { heading } : {}), ...(quote ? { quote } : {}), ...(pageNumber ? { pageNumber } : {}) } }),
   };
 }
 
@@ -256,14 +333,19 @@ function unionDuration(segments: AnalysisSegment[]) {
 
 export function normalizeResult(
   value: unknown,
-  durationSeconds: number
+  durationSeconds: number,
+  contentType: ContentType = "video"
 ): XianjianAnalysisResult {
   if (!value || typeof value !== "object") throw new Error("未获得结构化 JSON 结果");
   const raw = value as Record<string, unknown>;
   const segments = (Array.isArray(raw.segments) ? raw.segments : [])
-    .map(normalizeSegment)
+    .map((segment, index) => normalizeSegment(segment, index, contentType))
     .filter(Boolean) as AnalysisSegment[];
-  if (segments.length < 3) throw new Error("结构化结果少于 3 个有效时间码片段");
+  if (segments.length < 3) {
+    throw new Error(contentType === "video"
+      ? "结构化结果少于 3 个有效时间码片段"
+      : "结构化结果少于 3 个有效阅读片段");
+  }
   const signals =
     raw.signals && typeof raw.signals === "object"
       ? (raw.signals as Record<string, unknown>)
@@ -273,6 +355,8 @@ export function normalizeResult(
   const recommendedSeconds = unionDuration(segments);
   const verdict =
     raw.verdict === "worth" || raw.verdict === "skip" ? raw.verdict : "selective";
+  const match = score(signals.match);
+  const contentValue = valueScore(signals);
 
   const knowledge = (input: unknown) =>
     (Array.isArray(input) ? input : [])
@@ -285,11 +369,17 @@ export function normalizeResult(
 
   return {
     schemaVersion: "xianjian.v1",
+    ...(String(raw.contentTitle || "").trim()
+      ? { contentTitle: String(raw.contentTitle).trim().slice(0, 180) }
+      : {}),
     verdict,
     summary: String(raw.summary || "已完成个性化会议分析"),
     evidence: Array.isArray(raw.evidence) ? raw.evidence.map(String).slice(0, 8) : [],
     signals: {
-      match: score(signals.match),
+      match,
+      matchReason: String(signals.matchReason || scoreReason("match", match)),
+      value: contentValue,
+      valueReason: String(signals.valueReason || scoreReason("value", contentValue)),
       depth: score(signals.depth),
       promotion: score(signals.promotion),
       repetition: score(signals.repetition),
@@ -327,7 +417,11 @@ async function fetchWorkspaceCandidates(taskId: string) {
   return { workspace, candidates };
 }
 
-export async function recoverInfiniTask(taskId: string, durationSeconds: number) {
+export async function recoverInfiniTask(
+  taskId: string,
+  durationSeconds: number,
+  contentType: ContentType = "video"
+) {
   const [taskInfo, messages, workspaceResult] = await Promise.all([
     apiJson<unknown>(`/api/ai_task/getTaskInfo/${encodeURIComponent(taskId)}`),
     apiJson<unknown>(`/api/ai_task/getUiMessageById?id=${encodeURIComponent(taskId)}`),
@@ -343,7 +437,7 @@ export async function recoverInfiniTask(taskId: string, durationSeconds: number)
     if (!parsed) continue;
     try {
       return {
-        result: normalizeResult(parsed, durationSeconds),
+        result: normalizeResult(parsed, durationSeconds, contentType),
         taskInfo,
         messages,
         workspace: workspaceResult.workspace,
@@ -429,7 +523,11 @@ export async function startInfiniTask(options: RunOptions) {
   }
 }
 
-export async function requestInfiniRepair(taskId: string, connId: string) {
+export async function requestInfiniRepair(
+  taskId: string,
+  connId: string,
+  contentType: ContentType = "video"
+) {
   const { apiKey, baseUrl } = config();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort("repair timeout"), 45_000);
@@ -454,7 +552,9 @@ export async function requestInfiniRepair(taskId: string, connId: string) {
         taskId,
         connId,
         askResponse: "messageResponse",
-        text: "xianjian-result.json 不是合法 JSON。请修复并覆盖原文件：所有字符串内部的双引号必须转义；保持 xianjian.v1 字段不变；至少保留 3 个 startSeconds < endSeconds 的片段。最终回复只输出严格 JSON，不要 Markdown。",
+        text: contentType === "video"
+          ? "xianjian-result.json 不是合法 JSON。请修复并覆盖原文件：所有字符串内部的双引号必须转义；保持 xianjian.v1 字段不变；至少保留 3 个 startSeconds < endSeconds 的片段。最终回复只输出严格 JSON，不要 Markdown。"
+          : "xianjian-result.json 不是合法 JSON。请修复并覆盖原文件：保持 xianjian.v1 字段不变；至少保留 3 个按原文顺序排列的阅读片段，每段包含 locator.heading 和 locator.quote，PDF 可确认时包含 locator.pageNumber。最终回复只输出严格 JSON，不要 Markdown。",
       }),
       signal: controller.signal,
     });
@@ -566,7 +666,7 @@ export async function runInfiniAnalysis(options: RunOptions) {
     await readUntilCompletion();
     if (!taskId) throw new Error("真实任务已发送，但未返回 taskId");
     await options.onProgress({ stage: "正在核验工作区结果", taskId });
-    const recovery = await recoverInfiniTask(taskId, options.durationSeconds);
+    const recovery = await recoverInfiniTask(taskId, options.durationSeconds, options.contentType);
     if (recovery.result) return { taskId, ...recovery };
     for (const candidate of [...collected].reverse()) {
       const parsed = parseJsonCandidate(candidate);
@@ -574,7 +674,7 @@ export async function runInfiniAnalysis(options: RunOptions) {
       try {
         return {
           taskId,
-          result: normalizeResult(parsed, options.durationSeconds),
+          result: normalizeResult(parsed, options.durationSeconds, options.contentType),
           messages: collected,
           workspace: recovery.workspace,
           taskInfo: recovery.taskInfo,
@@ -592,13 +692,15 @@ export async function runInfiniAnalysis(options: RunOptions) {
         taskId,
         connId: options.connId,
         askResponse: "messageResponse",
-        text: "上一份结果未通过 xianjian.v1 校验。请修复为严格 JSON，必须包含至少 3 个 startSeconds < endSeconds 的有效时间码片段，并覆盖写入 xianjian-result.json；最终回复只输出 JSON。",
+        text: options.contentType === "video"
+          ? "上一份结果未通过 xianjian.v1 校验。请修复为严格 JSON，必须包含至少 3 个 startSeconds < endSeconds 的有效时间码片段，并覆盖写入 xianjian-result.json；最终回复只输出 JSON。"
+          : "上一份结果未通过 xianjian.v1 校验。请修复为严格 JSON，必须包含至少 3 个按原文顺序排列的阅读片段，每段包含 locator.heading 和 locator.quote，PDF 可确认时包含 locator.pageNumber；覆盖写入 xianjian-result.json，最终回复只输出 JSON。",
       }),
       signal: controller.signal,
     });
     if (repairResponse.ok) {
       await readUntilCompletion();
-      const repaired = await recoverInfiniTask(taskId, options.durationSeconds);
+      const repaired = await recoverInfiniTask(taskId, options.durationSeconds, options.contentType);
       if (repaired.result) return { taskId, ...repaired };
       for (const candidate of [...collected].reverse()) {
         const parsed = parseJsonCandidate(candidate);
@@ -606,7 +708,7 @@ export async function runInfiniAnalysis(options: RunOptions) {
         try {
           return {
             taskId,
-            result: normalizeResult(parsed, options.durationSeconds),
+            result: normalizeResult(parsed, options.durationSeconds, options.contentType),
             messages: collected,
             workspace: repaired.workspace,
             taskInfo: repaired.taskInfo,

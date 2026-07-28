@@ -5,13 +5,18 @@ import {
   parseTimecodeDuration,
   sha256,
 } from "../../../lib/db";
+import type { ContentType } from "../../../lib/types";
+
+const CONTENT_TYPES = new Set<ContentType>(["video", "article", "paper"]);
 
 export async function GET(request: Request) {
   const session = await getSession(request);
   const rows = await getD1()
-    .prepare(`SELECT m.id, m.title, m.source, m.duration_seconds AS durationSeconds,
+    .prepare(`SELECT m.id, m.title, m.source, m.content_type AS contentType,
+      m.video_url AS contentUrl, m.video_url AS videoUrl, m.duration_seconds AS durationSeconds,
       m.state, m.created_at AS createdAt,
-      a.id AS analysisId, a.status, a.task_id AS taskId, a.result_json AS resultJson
+      a.id AS analysisId, a.status, a.progress_text AS progressText,
+      a.task_id AS taskId, a.result_json AS resultJson
       FROM meetings m
       LEFT JOIN analyses a ON a.id = (
         SELECT id FROM analyses WHERE meeting_id = m.id ORDER BY created_at DESC LIMIT 1
@@ -30,12 +35,17 @@ export async function POST(request: Request) {
     source?: string;
     transcript?: string;
     videoUrl?: string;
+    contentUrl?: string;
+    contentType?: ContentType;
   };
-  const videoUrl = payload.videoUrl?.trim() || "";
-  let normalizedVideoUrl = "";
-  if (videoUrl) {
+  const contentType = CONTENT_TYPES.has(payload.contentType || "video")
+    ? (payload.contentType || "video")
+    : "video";
+  const contentUrl = payload.contentUrl?.trim() || payload.videoUrl?.trim() || "";
+  let normalizedContentUrl = "";
+  if (contentUrl) {
     try {
-      const parsed = new URL(videoUrl);
+      const parsed = new URL(contentUrl);
       if (!["http:", "https:"].includes(parsed.protocol)) throw new Error();
       if (
         /^(localhost|0\.0\.0\.0|127\.|10\.|192\.168\.|169\.254\.|\[?::1\]?$)/i.test(
@@ -44,46 +54,51 @@ export async function POST(request: Request) {
       ) {
         throw new Error();
       }
-      normalizedVideoUrl = parsed.toString();
+      normalizedContentUrl = parsed.toString();
     } catch {
       return json(
-        { error: "请提供可公开访问的 http(s) 视频链接" },
+        { error: "请提供可公开访问的 http(s) 内容链接" },
         { status: 400 },
         session.cookie
       );
     }
   }
-  const videoHost = normalizedVideoUrl ? new URL(normalizedVideoUrl).hostname.replace(/^www\./, "") : "";
+  const contentHost = normalizedContentUrl ? new URL(normalizedContentUrl).hostname.replace(/^www\./, "") : "";
+  const typeLabel = contentType === "video" ? "视频" : contentType === "paper" ? "论文" : "文章";
   const title =
     payload.title?.trim() ||
-    (videoHost ? `${videoHost} 视频` : "");
+    (contentHost ? `${contentHost} ${typeLabel}` : "");
+  const titleIsManual = Boolean(payload.title?.trim());
   const source =
     payload.source?.trim() ||
-    (videoHost ? `视频链接 · ${videoHost}` : "用户导入");
+    (contentHost ? `${typeLabel}链接 · ${contentHost}` : "用户导入");
+  const marker = contentType === "video" ? "VIDEO_URL" : contentType === "paper" ? "PAPER_URL" : "ARTICLE_URL";
   const transcript =
     payload.transcript?.trim() ||
-    (normalizedVideoUrl ? `VIDEO_URL:${normalizedVideoUrl}` : "");
+    (normalizedContentUrl ? `${marker}:${normalizedContentUrl}` : "");
   if (!title) {
     return json({ error: "请输入会议标题" }, { status: 400 }, session.cookie);
   }
-  if (!normalizedVideoUrl && transcript.length < 500) {
+  if (!normalizedContentUrl && transcript.length < 500) {
     return json(
-      { error: "字幕内容太短，请至少提供 500 个字符" },
+      { error: "内容太短，请至少提供 500 个字符" },
       { status: 400 },
       session.cookie
     );
   }
   if (transcript.length > 80_000) {
     return json(
-      { error: "字幕超过 80,000 字符，请拆分后再分析" },
+      { error: "内容超过 80,000 字符，请拆分后再分析" },
       { status: 413 },
       session.cookie
     );
   }
   const id = crypto.randomUUID();
   const transcriptHash = await sha256(transcript);
-  const durationSeconds = normalizedVideoUrl ? 0 : parseTimecodeDuration(transcript);
-  if (!normalizedVideoUrl && !durationSeconds) {
+  const durationSeconds = contentType === "video" && !normalizedContentUrl
+    ? parseTimecodeDuration(transcript)
+    : 0;
+  if (contentType === "video" && !normalizedContentUrl && !durationSeconds) {
     return json(
       { error: "没有识别到有效时间码，请使用 SRT、VTT 或带 HH:MM:SS 的文本" },
       { status: 400 },
@@ -92,13 +107,16 @@ export async function POST(request: Request) {
   }
   await getD1()
     .prepare(`INSERT INTO meetings
-      (id, session_id, title, source, transcript, transcript_hash, duration_seconds)
-      VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      (id, session_id, title, source, content_type, video_url, title_is_manual, transcript, transcript_hash, duration_seconds, state)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`)
     .bind(
       id,
       session.sessionId,
       title.slice(0, 180),
       source.slice(0, 180),
+      contentType,
+      normalizedContentUrl || null,
+      titleIsManual ? 1 : 0,
       transcript,
       transcriptHash,
       durationSeconds
@@ -110,9 +128,11 @@ export async function POST(request: Request) {
         id,
         title,
         source,
-        videoUrl: normalizedVideoUrl || null,
+        contentType,
+        contentUrl: normalizedContentUrl || null,
+        videoUrl: contentType === "video" ? normalizedContentUrl || null : null,
         durationSeconds,
-        state: "archived",
+        state: "pending",
       },
     },
     { status: 201 },

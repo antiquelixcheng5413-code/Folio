@@ -32,7 +32,7 @@ export async function GET(request: Request) {
     {
       demo: {
         title: "从 Demo 到可靠产品：长任务 Agent 的四个真实复盘",
-        source: "先鉴原创模拟会议 · Agent Systems Forum 2026",
+        source: "未读先知原创模拟会议 · Agent Systems Forum 2026",
         transcript,
       },
       profiles: [

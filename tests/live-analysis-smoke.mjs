@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 const baseUrl =
   process.env.XIANJIAN_TEST_URL ||
   "https://xianjian-conference-os.sleek-shrew-6035.chatgpt.site";
-const profileId = process.env.XIANJIAN_PROFILE || "product";
 const timeoutMs = Number(process.env.XIANJIAN_TIMEOUT_MS || 12 * 60 * 1000);
 
 let cookie = "";
@@ -70,18 +69,10 @@ const health = await jsonRequest("/api/health");
 assert.equal(health.infiniSynapse, "configured");
 
 const demo = await jsonRequest("/api/demo");
-const selectedProfile = demo.profiles.find((item) => item.id === profileId);
-assert.ok(selectedProfile, `Unknown demo profile: ${profileId}`);
-
-await jsonRequest("/api/profile", {
-  method: "PATCH",
-  body: JSON.stringify(selectedProfile.profile),
-});
-
 const meetingPayload = await jsonRequest("/api/meetings", {
   method: "POST",
   body: JSON.stringify({
-    title: `${demo.demo.title} · ${selectedProfile.name}`,
+    title: `${demo.demo.title} · 自动画像验证`,
     source: demo.demo.source,
     transcript: demo.demo.transcript,
   }),
@@ -178,8 +169,7 @@ assert.equal(durable.analysis.status, "completed");
 console.log(
   JSON.stringify({
     ok: true,
-    profileId,
-    profileName: selectedProfile.name,
+    profileSource: "shelved-video-knowledge",
     meetingId,
     analysisId,
     taskId,

@@ -17,15 +17,27 @@ export const profiles = sqliteTable("profiles", {
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
+export const workspaceSettings = sqliteTable("workspace_settings", {
+  sessionId: text("session_id").primaryKey(),
+  autoCreateNote: integer("auto_create_note").notNull().default(1),
+  autoDiscoverVideos: integer("auto_discover_videos").notNull().default(0),
+  autoAnalyzeDiscoveries: integer("auto_analyze_discoveries").notNull().default(0),
+  titleMode: text("title_mode").notNull().default("automatic"),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
 export const meetings = sqliteTable("meetings", {
   id: text("id").primaryKey(),
   sessionId: text("session_id").notNull(),
   title: text("title").notNull(),
   source: text("source").notNull(),
+  contentType: text("content_type").notNull().default("video"),
+  videoUrl: text("video_url"),
+  titleIsManual: integer("title_is_manual").notNull().default(0),
   transcript: text("transcript").notNull(),
   transcriptHash: text("transcript_hash").notNull(),
   durationSeconds: integer("duration_seconds").notNull().default(0),
-  state: text("state").notNull().default("archived"),
+  state: text("state").notNull().default("pending"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
@@ -67,4 +79,20 @@ export const knowledgeItems = sqliteTable("knowledge_items", {
   status: text("status").notNull(),
   evidence: text("evidence").notNull().default(""),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const discoveryCandidates = sqliteTable("discovery_candidates", {
+  id: text("id").primaryKey(),
+  sessionId: text("session_id").notNull(),
+  keyword: text("keyword").notNull(),
+  title: text("title").notNull(),
+  videoUrl: text("video_url").notNull(),
+  source: text("source").notNull(),
+  snippet: text("snippet").notNull().default(""),
+  status: text("status").notNull().default("recommended"),
+  meetingId: text("meeting_id"),
+  analysisId: text("analysis_id"),
+  errorMessage: text("error_message"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });

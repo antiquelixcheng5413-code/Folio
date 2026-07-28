@@ -1,6 +1,6 @@
 import { getD1, getSession, sha256 } from "../../../../../lib/db";
 import { startInfiniTask } from "../../../../../lib/infinisynapse";
-import type { LearningProfile } from "../../../../../lib/types";
+import type { ContentType, LearningProfile } from "../../../../../lib/types";
 
 type MeetingRow = {
   id: string;
@@ -8,6 +8,7 @@ type MeetingRow = {
   transcript: string;
   transcriptHash: string;
   durationSeconds: number;
+  contentType: ContentType;
 };
 
 function sse(controller: ReadableStreamDefaultController, event: string, data: unknown) {
@@ -25,6 +26,7 @@ export async function POST(
   const db = getD1();
   const meeting = await db
     .prepare(`SELECT id, title, transcript, transcript_hash AS transcriptHash,
+      content_type AS contentType,
       duration_seconds AS durationSeconds
       FROM meetings WHERE id = ? AND session_id = ?`)
     .bind(id, session.sessionId)
@@ -41,17 +43,25 @@ export async function POST(
       headers: { "content-type": "application/json", ...(session.cookie ? { "set-cookie": session.cookie } : {}) },
     });
   }
-  const profile = await db
-    .prepare(`SELECT direction, level, project, known_topics AS knownTopics,
-      preferences FROM profiles WHERE session_id = ?`)
+  const learned = await db
+    .prepare(`SELECT k.topic, k.status, k.evidence
+      FROM knowledge_items k JOIN meetings m ON m.id = k.meeting_id
+      WHERE k.session_id = ? AND m.state IN ('shelved', 'later', 'completed')
+      ORDER BY k.created_at DESC LIMIT 60`)
     .bind(session.sessionId)
-    .first<LearningProfile>();
-  if (!profile) {
-    return new Response(JSON.stringify({ error: "个人画像不存在" }), {
-      status: 400,
-      headers: { "content-type": "application/json", ...(session.cookie ? { "set-cookie": session.cookie } : {}) },
-    });
-  }
+    .all<{ topic: string; status: string; evidence: string }>();
+  const learnedTopics = [...new Set(learned.results.map((item) => item.topic).filter(Boolean))];
+  const profile: LearningProfile = {
+    direction: learnedTopics.length
+      ? `从已入架内容累计的主题：${learnedTopics.slice(0, 10).join("、")}`
+      : "尚未形成；这是第一次内容分析",
+    level: learnedTopics.length
+      ? `已累计 ${learnedTopics.length} 个知识节点`
+      : "尚无历史记录",
+    project: "根据已入架内容持续推断，不要求用户手动维护",
+    knownTopics: learnedTopics.join("、") || "暂无",
+    preferences: "优先信息密度高、来源可信、少推广和少重复的内容",
+  };
   const today = await db
     .prepare(`SELECT COUNT(*) AS count FROM analyses
       WHERE session_id = ? AND date(created_at) = date('now')`)
@@ -118,6 +128,7 @@ export async function POST(
           meetingTitle: meeting.title,
           profile,
           durationSeconds: meeting.durationSeconds,
+          contentType: meeting.contentType,
           onProgress: async (progress) => {
             await db
               .prepare(`UPDATE analyses SET progress_text = ?,
