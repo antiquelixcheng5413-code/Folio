@@ -1,5 +1,5 @@
 @import "tailwindcss";
-@import "../../conference-os-prototype/styles.css";
+@import "./prototype-styles.css";
 
 button, input, textarea, select { font: inherit; }
 button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible {
