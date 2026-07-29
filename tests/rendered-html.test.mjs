@@ -3,7 +3,23 @@ import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("build contains the Peek product and deployable worker", async () => {
-  const [page, layout, client, styles, prompt, personalization, meetingState, analysisRoute, taxonomy] = await Promise.all([
+  const [
+    page,
+    layout,
+    client,
+    styles,
+    prompt,
+    personalization,
+    meetingState,
+    analysisRoute,
+    taxonomy,
+    learningAssistant,
+    notebook,
+    notesAsk,
+    notesTranslate,
+    coreReport,
+    migration,
+  ] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/peek-app.tsx", import.meta.url), "utf8"),
@@ -13,6 +29,12 @@ test("build contains the Peek product and deployable worker", async () => {
     readFile(new URL("../app/api/meetings/[id]/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/analyses/[id]/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/skill-taxonomy.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/learning-assistant.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/notebook.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/notes/ask/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/notes/translate/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../docs/PEEK_CORE_MODEL_AND_SCORING_REPORT.md", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0001_notebook_translations.sql", import.meta.url), "utf8"),
     access(new URL("../dist/server/index.js", import.meta.url)),
     access(new URL("../dist/.openai/hosting.json", import.meta.url)),
   ]);
@@ -39,7 +61,7 @@ test("build contains the Peek product and deployable worker", async () => {
   assert.match(client, /已同步学习空间/);
   assert.match(client, /由纳入书架的内容自动累计/);
   assert.match(client, /每次分析自动生成笔记/);
-  assert.match(client, /导出 Markdown/);
+  assert.match(client, /导出笔记/);
 assert.match(client, /打开原视频并定位到此时间码/);
 assert.match(client, /定位原文章节/);
 assert.match(client, /\["video", "article", "paper"\]/);
@@ -57,7 +79,12 @@ assert.match(client, /titleMode/);
   assert.match(client, /translateReport/);
   assert.match(client, /analysis-progress-bar/);
   assert.match(client, /notebook-document/);
-  assert.match(client, /向 Peek 提问/);
+  assert.match(client, /RichNote/);
+  assert.match(client, /notebook-companion/);
+  assert.match(client, /笔记语言/);
+  assert.match(client, /\/api\/notes\/ask/);
+  assert.match(client, /\/api\/notes\/translate/);
+  assert.match(client, /问 Peek/);
   assert.match(client, /自动发现候选视频/);
   assert.match(client, /发现后自动分析/);
   assert.match(client, /每天最多 1 条/);
@@ -106,5 +133,14 @@ assert.match(client, /titleMode/);
   assert.match(analysisRoute, /k\.meeting_id !=/);
   assert.match(meetingState, /mastery_level/);
   assert.match(meetingState, /DELETE FROM analysis_translations/);
+  assert.match(learningAssistant, /buildLearningQaPrompt/);
+  assert.match(learningAssistant, /SOURCE_TEXT/);
+  assert.match(learningAssistant, /用户不需要写提示词/);
+  assert.match(notebook, /buildStructuredNote/);
+  assert.match(notesAsk, /answerLearningQuestion/);
+  assert.match(notesTranslate, /notebook_translations/);
+  assert.match(coreReport, /Peek 模型调用与评分核心报告/);
+  assert.match(coreReport, /最终匹配度/);
+  assert.match(migration, /CREATE TABLE `notebook_translations`/);
   assert.doesNotMatch(`${page}${layout}${client}`, /codex-preview|SkeletonPreview|Starter Project/);
 });

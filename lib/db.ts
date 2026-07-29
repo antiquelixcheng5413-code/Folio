@@ -140,6 +140,15 @@ export async function ensureSchema() {
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (analysis_id, language)
       )`),
+      db.prepare(`CREATE TABLE IF NOT EXISTS notebook_translations (
+        cache_key TEXT PRIMARY KEY,
+        meeting_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        language TEXT NOT NULL,
+        source_hash TEXT NOT NULL,
+        content_json TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )`),
       db.prepare("CREATE INDEX IF NOT EXISTS meetings_session_idx ON meetings(session_id, created_at DESC)"),
       db.prepare("CREATE INDEX IF NOT EXISTS analyses_session_idx ON analyses(session_id, created_at DESC)"),
       db.prepare("CREATE INDEX IF NOT EXISTS analyses_input_idx ON analyses(session_id, input_hash)"),
@@ -148,6 +157,7 @@ export async function ensureSchema() {
       db.prepare("CREATE INDEX IF NOT EXISTS discovery_session_idx ON discovery_candidates(session_id, created_at DESC)"),
       db.prepare("CREATE INDEX IF NOT EXISTS auth_users_session_idx ON auth_users(session_id)"),
       db.prepare("CREATE INDEX IF NOT EXISTS translations_session_idx ON analysis_translations(session_id, created_at DESC)"),
+      db.prepare("CREATE INDEX IF NOT EXISTS notebook_translations_session_idx ON notebook_translations(session_id, meeting_id)"),
     ]);
     try {
       await db.prepare("ALTER TABLE meetings ADD COLUMN video_url TEXT").run();

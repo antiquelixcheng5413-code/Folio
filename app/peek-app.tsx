@@ -73,6 +73,12 @@ type DiscoveryItem = {
   errorMessage?: string | null;
   result?: XianjianAnalysisResult | null;
 };
+type LearningAnswerPayload = {
+  answer: string;
+  note: string;
+  evidence?: string[];
+  confidence?: "high" | "medium" | "low";
+};
 
 const SHELF_STATES = new Set(["shelved", "later", "completed"]);
 const ACTIVE_ANALYSIS_STATUSES = new Set(["queued", "running", "recovering", "repairing"]);
@@ -1000,12 +1006,77 @@ function VideoShelfView({ language, items, onOpen, onState }: { language: Langua
   );
 }
 
+function inlineMarkdown(text: string) {
+  return text.split(/(\*\*[^*]+\*\*)/g).filter(Boolean).map((part, index) =>
+    part.startsWith("**") && part.endsWith("**")
+      ? <strong key={`${part}-${index}`}>{part.slice(2, -2)}</strong>
+      : <span key={`${part}-${index}`}>{part}</span>
+  );
+}
+
+function RichNote({ content }: { content: string }) {
+  const lines = content.replace(/\r\n/g, "\n").split("\n");
+  const blocks: ReactNode[] = [];
+  let index = 0;
+  while (index < lines.length) {
+    const line = lines[index].trim();
+    if (!line) {
+      index += 1;
+      continue;
+    }
+    const heading = line.match(/^(#{1,3})\s+(.+)$/);
+    if (heading) {
+      const level = heading[1].length;
+      const text = heading[2];
+      blocks.push(level === 1
+        ? <h2 key={`h-${index}`}>{inlineMarkdown(text)}</h2>
+        : level === 2
+          ? <h3 key={`h-${index}`}>{inlineMarkdown(text)}</h3>
+          : <h4 key={`h-${index}`}>{inlineMarkdown(text)}</h4>);
+      index += 1;
+      continue;
+    }
+    if (/^\s*[-*]\s+/.test(lines[index])) {
+      const entries: string[] = [];
+      while (index < lines.length && /^\s*[-*]\s+/.test(lines[index])) {
+        entries.push(lines[index].replace(/^\s*[-*]\s+/, "").trim());
+        index += 1;
+      }
+      blocks.push(<ul key={`list-${index}`}>{entries.map((entry, itemIndex) =>
+        <li key={`${entry}-${itemIndex}`}>{inlineMarkdown(entry)}</li>
+      )}</ul>);
+      continue;
+    }
+    const paragraph = [line];
+    index += 1;
+    while (
+      index < lines.length &&
+      lines[index].trim() &&
+      !/^(#{1,3})\s+/.test(lines[index].trim()) &&
+      !/^\s*[-*]\s+/.test(lines[index])
+    ) {
+      paragraph.push(lines[index].trim());
+      index += 1;
+    }
+    blocks.push(<p key={`p-${index}`}>{inlineMarkdown(paragraph.join(" "))}</p>);
+  }
+  return <div className="rich-note">{blocks}</div>;
+}
+
 function NotesView({ language, items, onChanged }: { language: Language; items: NoteItem[]; onChanged: () => Promise<void> }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [rebuildBusy, setRebuildBusy] = useState(false);
   const [openMeetingId, setOpenMeetingId] = useState<string | null>(items[0]?.meetingId || null);
+  const [noteLanguage, setNoteLanguage] = useState<Language>("zh");
+  const [translatedNotes, setTranslatedNotes] = useState<Record<string, Record<string, string>>>({});
+  const [translationBusy, setTranslationBusy] = useState(false);
+  const [translationError, setTranslationError] = useState("");
+  const [notebookQuestion, setNotebookQuestion] = useState("");
+  const [notebookAnswer, setNotebookAnswer] = useState<LearningAnswerPayload | null>(null);
+  const [notebookAskBusy, setNotebookAskBusy] = useState(false);
+  const [notebookAskError, setNotebookAskError] = useState("");
   const groups = useMemo(() => {
     const map = new Map<string, { meetingId: string; title: string; items: NoteItem[]; updatedAt: string }>();
     for (const item of items) {
@@ -1020,6 +1091,66 @@ function NotesView({ language, items, onChanged }: { language: Language; items: 
     if (!openMeetingId && groups.length) setOpenMeetingId(groups[0].meetingId);
   }, [groups, openMeetingId]);
 
+  const translateNotebook = async (meetingId: string) => {
+    if (translatedNotes[meetingId]) return;
+    setTranslationBusy(true);
+    setTranslationError("");
+    try {
+      const payload = await api<{ items: Array<{ id: string; content: string }> }>("/api/notes/translate", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ meetingId, language: "en" }),
+      });
+      setTranslatedNotes((current) => ({
+        ...current,
+        [meetingId]: Object.fromEntries(payload.items.map((item) => [item.id, item.content])),
+      }));
+    } catch (caught) {
+      setTranslationError(caught instanceof Error ? caught.message : "英文笔记生成失败");
+      throw caught;
+    } finally {
+      setTranslationBusy(false);
+    }
+  };
+
+  const switchNoteLanguage = async (target: Language) => {
+    if (target === "zh") {
+      setNoteLanguage("zh");
+      setTranslationError("");
+      return;
+    }
+    if (!openMeetingId) return;
+    try {
+      await translateNotebook(openMeetingId);
+      setNoteLanguage("en");
+    } catch {
+      // The visible error above explains the failure.
+    }
+  };
+
+  const askNotebook = async () => {
+    if (!openMeetingId || notebookQuestion.trim().length < 2) return;
+    setNotebookAskBusy(true);
+    setNotebookAskError("");
+    setNotebookAnswer(null);
+    try {
+      const payload = await api<LearningAnswerPayload>("/api/notes/ask", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          meetingId: openMeetingId,
+          question: notebookQuestion,
+          language: noteLanguage,
+        }),
+      });
+      setNotebookAnswer(payload);
+    } catch (caught) {
+      setNotebookAskError(caught instanceof Error ? caught.message : (language === "zh" ? "暂时没有获得回答，请重试" : "No answer yet. Please try again."));
+    } finally {
+      setNotebookAskBusy(false);
+    }
+  };
+
   const save = async (item: NoteItem) => {
     if (!draft.trim()) return;
     setBusyId(item.id);
@@ -1030,6 +1161,11 @@ function NotesView({ language, items, onChanged }: { language: Language; items: 
         body: JSON.stringify({ content: draft }),
       });
       setEditingId(null);
+      setTranslatedNotes((current) => {
+        const next = { ...current };
+        delete next[item.meetingId];
+        return next;
+      });
       await onChanged();
     } finally {
       setBusyId(null);
@@ -1040,6 +1176,11 @@ function NotesView({ language, items, onChanged }: { language: Language; items: 
     setBusyId(item.id);
     try {
       await api(`/api/notes/${item.id}`, { method: "DELETE" });
+      setTranslatedNotes((current) => {
+        const next = { ...current };
+        delete next[item.meetingId];
+        return next;
+      });
       await onChanged();
     } finally {
       setBusyId(null);
@@ -1052,9 +1193,9 @@ function NotesView({ language, items, onChanged }: { language: Language; items: 
       `## ${item.title}`,
       item.timecodeSeconds == null ? "" : `时间码：${timecode(item.timecodeSeconds)}`,
       "",
-      item.content,
+      noteLanguage === "en" ? translatedNotes[item.meetingId]?.[item.id] || item.content : item.content,
     ].filter(Boolean).join("\n")).join("\n\n---\n\n");
-    const markdown = `# ${language === "zh" ? "先鉴 Peek 笔记本" : "Peek notebook"}\n\n${language === "zh" ? "导出时间" : "Exported"}：${exportedAt}\n\n${entries}`;
+    const markdown = `# ${noteLanguage === "zh" ? "先鉴 Peek 笔记本" : "Peek Notebook"}\n\n${language === "zh" ? "导出时间" : "Exported"}：${exportedAt}\n\n${entries}`;
     const link = document.createElement("a");
     link.href = URL.createObjectURL(new Blob([markdown], { type: "text/markdown;charset=utf-8" }));
     link.download = `unread-insight-notes-${new Date().toISOString().slice(0, 10)}.md`;
@@ -1068,13 +1209,15 @@ function NotesView({ language, items, onChanged }: { language: Language; items: 
     <section className="page page-view notes-page">
       <div className="page-title"><div><span className="eyebrow">TIMESTAMP NOTEBOOK</span><h1>{copy[language].notes}</h1><p>{language === "zh" ? "所有在分析片段下写过的时间码笔记，都集中保存在这里。" : "Every timestamp note written under an analyzed segment is collected here."}</p></div><div className="saved-pill"><span>{language === "zh" ? "笔记总数" : "TOTAL NOTES"}</span><strong>{items.length}</strong></div></div>
       <article className="content-panel notes-panel notebook-library">
-        <div className="section-head border-bottom"><div><h2>{language === "zh" ? "我的笔记本" : "My notebook"}</h2><p>{language === "zh" ? "同一内容的总结与边栏批注放在一起" : "Summary and margin notes are grouped by content"}</p></div><div className="notebook-toolbar"><button className="outline-button export-notes" disabled={!openMeetingId || rebuildBusy} onClick={async () => { if (!openMeetingId) return; setRebuildBusy(true); try { await api("/api/notes/rebuild", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ meetingId: openMeetingId }) }); await onChanged(); } finally { setRebuildBusy(false); } }}>{rebuildBusy ? (language === "zh" ? "整理中…" : "Rebuilding…") : (language === "zh" ? "重新整理笔记" : "Reorganize notes")}</button><button className="outline-button export-notes" disabled={!items.length} onClick={exportNotebook}>{language === "zh" ? "导出 Markdown" : "Export Markdown"}</button></div></div>
+        <div className="section-head border-bottom"><div><h2>{language === "zh" ? "我的笔记本" : "My notebook"}</h2><p>{language === "zh" ? "正文、边栏批注和随时问答都按内容收在一起" : "Notes, annotations and Q&A stay together by item"}</p></div><div className="notebook-toolbar"><div className="note-language-switch" role="group" aria-label={language === "zh" ? "笔记语言" : "Note language"}><button className={noteLanguage === "zh" ? "active" : ""} disabled={translationBusy} onClick={() => void switchNoteLanguage("zh")}>中文</button><button className={noteLanguage === "en" ? "active" : ""} disabled={translationBusy || !openMeetingId} onClick={() => void switchNoteLanguage("en")}>{translationBusy ? (language === "zh" ? "转换中…" : "Translating…") : "English"}</button></div><button className="outline-button export-notes" disabled={!openMeetingId || rebuildBusy || noteLanguage !== "zh"} onClick={async () => { if (!openMeetingId) return; setRebuildBusy(true); try { await api("/api/notes/rebuild", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ meetingId: openMeetingId }) }); setTranslatedNotes((current) => { const next = { ...current }; delete next[openMeetingId]; return next; }); await onChanged(); } finally { setRebuildBusy(false); } }}>{rebuildBusy ? (language === "zh" ? "整理中…" : "Rebuilding…") : (language === "zh" ? "重新整理笔记" : "Reorganize notes")}</button><button className="outline-button export-notes" disabled={!items.length} onClick={exportNotebook}>{language === "zh" ? "导出笔记" : "Export notes"}</button></div></div>
+        {translationError && <div className="notebook-language-error">{translationError}</div>}
         {!items.length && <div className="notes-empty"><span>✎</span><h2>{language === "zh" ? "还没有笔记" : "No notes yet"}</h2><p>{language === "zh" ? "先打开一条内容的分析路线，在任意片段下添加笔记。" : "Open an analysis route and add a note under any segment."}</p></div>}
         <div className="notebook-groups">
           {groups.map((group) => {
             const open = openMeetingId === group.meetingId;
             const summary = group.items.find((item) => item.segmentId?.startsWith("analysis-summary:")) || group.items[0];
-            return <article className={`notebook-document ${open ? "open" : ""}`} key={group.meetingId}><button className="notebook-cover" onClick={() => setOpenMeetingId(open ? null : group.meetingId)}><span className="notebook-icon">▤</span><div><strong>{group.title}</strong><small>{group.items.length} {language === "zh" ? "条批注" : "annotations"} · {new Date(group.updatedAt).toLocaleDateString(language === "zh" ? "zh-CN" : "en-US")}</small><p>{summary.content.replace(/^#+.*$/gm, "").trim().slice(0, 120)}</p></div><i>{open ? "−" : "+"}</i></button>{open && <div className="notebook-pages"><aside className="notebook-margin"><span>{language === "zh" ? "边栏批注" : "MARGIN NOTES"}</span>{group.items.filter((item) => item.timecodeSeconds != null).map((item) => <button key={item.id} onClick={() => document.getElementById(`note-${item.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" })}>{timecode(item.timecodeSeconds || 0)}</button>)}</aside><div className="note-list grouped">{group.items.map((item) => <article className={`note-entry ${item.segmentId?.startsWith("analysis-summary:") ? "summary-note" : ""}`} id={`note-${item.id}`} key={item.id}><div className="note-time">{item.timecodeSeconds == null ? (item.segmentId?.startsWith("analysis-summary:") ? "总" : "—") : timecode(item.timecodeSeconds)}</div><div className="note-body">{editingId === item.id ? <textarea value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={4000} autoFocus /> : <p>{item.content}</p>}<small>{new Date(item.updatedAt || item.createdAt).toLocaleString(language === "zh" ? "zh-CN" : "en-US", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}</small></div><div className="note-actions">{editingId === item.id ? <><button disabled={busyId === item.id || !draft.trim()} onClick={() => save(item)}>{language === "zh" ? "保存" : "Save"}</button><button className="ghost-action" onClick={() => setEditingId(null)}>{language === "zh" ? "取消" : "Cancel"}</button></> : <><button onClick={() => { setEditingId(item.id); setDraft(item.content); }}>{language === "zh" ? "编辑" : "Edit"}</button><button className="ghost-action danger" disabled={busyId === item.id} onClick={() => remove(item)}>{language === "zh" ? "删除" : "Delete"}</button></>}</div></article>)}</div></div>}</article>;
+            const translated = translatedNotes[group.meetingId] || {};
+            return <article className={`notebook-document ${open ? "open" : ""}`} key={group.meetingId}><button className="notebook-cover" onClick={() => { const next = open ? null : group.meetingId; setOpenMeetingId(next); setNotebookAnswer(null); setNotebookAskError(""); if (next && noteLanguage === "en") void translateNotebook(next); }}><span className="notebook-icon">▤</span><div><strong>{group.title}</strong><small>{group.items.length} {language === "zh" ? "条笔记" : "notes"} · {new Date(group.updatedAt).toLocaleDateString(language === "zh" ? "zh-CN" : "en-US")}</small><p>{summary.content.replace(/^#+.*$/gm, "").replace(/\*\*/g, "").trim().slice(0, 120)}</p></div><i>{open ? "−" : "+"}</i></button>{open && <div className="notebook-pages"><aside className="notebook-margin"><span>{language === "zh" ? "边栏批注" : "MARGIN NOTES"}</span>{group.items.filter((item) => item.timecodeSeconds != null).map((item) => <button key={item.id} onClick={() => document.getElementById(`note-${item.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" })}>{timecode(item.timecodeSeconds || 0)}</button>)}</aside><div className="note-list grouped">{group.items.map((item) => { const visibleContent = noteLanguage === "en" ? translated[item.id] || item.content : item.content; return <article className={`note-entry ${item.segmentId?.startsWith("analysis-summary:") ? "summary-note" : ""}`} id={`note-${item.id}`} key={item.id}><div className="note-time">{item.timecodeSeconds == null ? (item.segmentId?.startsWith("analysis-summary:") ? (noteLanguage === "zh" ? "总" : "MAIN") : "—") : timecode(item.timecodeSeconds)}</div><div className="note-body">{editingId === item.id ? <textarea value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={4000} autoFocus /> : <RichNote content={visibleContent} />}<small>{new Date(item.updatedAt || item.createdAt).toLocaleString(language === "zh" ? "zh-CN" : "en-US", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}</small></div>{noteLanguage === "zh" && <div className="note-actions">{editingId === item.id ? <><button disabled={busyId === item.id || !draft.trim()} onClick={() => save(item)}>{language === "zh" ? "保存" : "Save"}</button><button className="ghost-action" onClick={() => setEditingId(null)}>{language === "zh" ? "取消" : "Cancel"}</button></> : <><button onClick={() => { setEditingId(item.id); setDraft(item.content); }}>{language === "zh" ? "编辑" : "Edit"}</button><button className="ghost-action danger" disabled={busyId === item.id} onClick={() => remove(item)}>{language === "zh" ? "删除" : "Delete"}</button></>}</div>}</article>; })}</div><aside className="notebook-companion"><img src="/mascot-v2.png" alt="Peek" /><span className="eyebrow">ASK PEEK</span><h3>{noteLanguage === "zh" ? "哪里没看懂，直接问" : "Ask anything about this item"}</h3><p>{noteLanguage === "zh" ? "不用写提示词。Peek 会回到原内容和分析报告里找依据。" : "No prompting skills needed. Peek checks the source and report for evidence."}</p><textarea value={notebookQuestion} onChange={(event) => setNotebookQuestion(event.target.value)} maxLength={800} placeholder={noteLanguage === "zh" ? "例如：这三个要素分别是什么？" : "e.g. What are the three elements?"} /><button className="primary-button" disabled={notebookAskBusy || notebookQuestion.trim().length < 2} onClick={askNotebook}>{notebookAskBusy ? (noteLanguage === "zh" ? "Peek 正在查找…" : "Peek is checking…") : (noteLanguage === "zh" ? "问 Peek" : "Ask Peek")}</button>{notebookAskError && <div className="qa-error">{notebookAskError}</div>}{notebookAnswer && <div className="notebook-answer"><RichNote content={notebookAnswer.answer} /><button onClick={async () => { await api("/api/notes", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ meetingId: group.meetingId, segmentId: `qa:${Date.now()}`, content: notebookAnswer.note }) }); setNoteLanguage("zh"); setTranslatedNotes((current) => { const next = { ...current }; delete next[group.meetingId]; return next; }); await onChanged(); }}>{noteLanguage === "zh" ? "＋ 加入这篇笔记" : "+ Add to notebook"}</button></div>}</aside></div>}</article>;
           })}
         </div>
       </article>
@@ -1328,7 +1471,7 @@ function DetailView({ language, analysis, onBack, onState, onNoteSaved }: { lang
   const [shelfBusy, setShelfBusy] = useState(false);
   const [playError, setPlayError] = useState("");
   const [question, setQuestion] = useState("");
-  const [answer, setAnswer] = useState<{ answer: string; note: string } | null>(null);
+  const [answer, setAnswer] = useState<LearningAnswerPayload | null>(null);
   const [askBusy, setAskBusy] = useState(false);
   const [askError, setAskError] = useState("");
   const result = translatedResult || analysis.result!;
@@ -1363,7 +1506,7 @@ function DetailView({ language, analysis, onBack, onState, onNoteSaved }: { lang
     setAskError("");
     setAnswer(null);
     try {
-      const payload = await api<{ answer: string; note: string }>(`/api/analyses/${analysis.id}/ask`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ question, language }) });
+      const payload = await api<LearningAnswerPayload>(`/api/analyses/${analysis.id}/ask`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ question, language }) });
       setAnswer(payload);
     } catch (caught) {
       setAskError(caught instanceof Error ? caught.message : (language === "zh" ? "暂时无法回答" : "Could not answer right now."));
@@ -1453,7 +1596,7 @@ function DetailView({ language, analysis, onBack, onState, onNoteSaved }: { lang
           ))}</div>
         </article>
         <aside className="detail-aside">
-          <article className="qa-card"><div className="aside-heading"><div><span className="eyebrow">ASK PEEK</span><h3>{language === "zh" ? "针对这篇内容提问" : "Ask about this content"}</h3></div><b>?</b></div><p>{language === "zh" ? "回答只依据当前分析报告；证据不足时会明确说明。" : "Answers are grounded in this report and flag missing evidence."}</p><textarea value={question} onChange={(event) => setQuestion(event.target.value)} maxLength={800} placeholder={language === "zh" ? "例如：视频提到的三个要素具体是什么？" : "e.g. What exactly are the three elements mentioned?"} /><button className="primary-button" disabled={askBusy || question.trim().length < 2} onClick={askPeek}>{askBusy ? (language === "zh" ? "Peek 正在查找依据…" : "Peek is checking evidence…") : (language === "zh" ? "向 Peek 提问" : "Ask Peek")}</button>{askError && <div className="qa-error">{askError}</div>}{answer && <div className="qa-answer"><strong>{language === "zh" ? "回答" : "Answer"}</strong><p>{answer.answer}</p><button onClick={async () => { await api("/api/notes", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ meetingId: analysis.meetingId, segmentId: `qa:${Date.now()}`, content: `Q：${question}\n\n${answer.note}` }) }); onNoteSaved(); }}>{language === "zh" ? "＋ 加入这篇内容的笔记" : "+ Add to this content's notes"}</button></div>}</article>
+          <article className="qa-card"><div className="qa-card-head"><img src="/mascot-v2.png" alt="Peek" /><div><span className="eyebrow">ASK PEEK</span><h3>{language === "zh" ? "不懂的地方，直接问" : "Ask anything about this item"}</h3></div></div><p>{language === "zh" ? "不用写提示词。Peek 会回到原内容和报告里找具体答案。" : "No prompting skills needed. Peek checks the source and report for a specific answer."}</p><div className="qa-suggestions">{(language === "zh" ? ["这几个要素分别是什么？", "核心结论怎么推出来的？", "最难的概念是什么？"] : ["What are the key elements?", "How is the conclusion derived?", "What is the hardest concept?"]).map((item) => <button key={item} onClick={() => setQuestion(item)}>{item}</button>)}</div><textarea value={question} onChange={(event) => setQuestion(event.target.value)} maxLength={800} placeholder={language === "zh" ? "直接写下你的问题…" : "Write your question naturally…"} /><button className="primary-button" disabled={askBusy || question.trim().length < 2} onClick={askPeek}>{askBusy ? (language === "zh" ? "Peek 正在回到内容里查找…" : "Peek is checking the source…") : (language === "zh" ? "问 Peek" : "Ask Peek")}</button>{askError && <div className="qa-error">{askError}</div>}{answer && <div className="qa-answer"><strong>{language === "zh" ? "Peek 的回答" : "Peek's answer"}</strong><RichNote content={answer.answer} />{answer.evidence?.length ? <details><summary>{language === "zh" ? "查看依据" : "View evidence"}</summary><ul>{answer.evidence.map((item) => <li key={item}>{item}</li>)}</ul></details> : null}<button onClick={async () => { await api("/api/notes", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ meetingId: analysis.meetingId, segmentId: `qa:${Date.now()}`, content: `## ${language === "zh" ? "随时问" : "Q&A"}\n\n**${language === "zh" ? "问题" : "Question"}：**${question}\n\n${answer.note}` }) }); onNoteSaved(); }}>{language === "zh" ? "＋ 加入这篇内容的笔记" : "+ Add to this content's notes"}</button></div>}</article>
           <article className="why-card highlight-card"><div className="aside-heading"><div><span className="eyebrow">HIGHLIGHTS</span><h3>{language === "zh" ? "精华内容" : "Highlights"}</h3></div><b>{highlights.length}</b></div><ul>{highlights.map((item) => <li key={item.id}><i /><span><strong>{item.title}</strong><small>{item.value}</small></span></li>)}</ul></article>
           <article className="score-card">
             <div className="score-block match-score"><div><span className="score-label">{language === "zh" ? "与你的匹配度" : "Your match"}<InfoTip label={language === "zh" ? "匹配度说明" : "About this score"}>{matchExplanation}</InfoTip></span><em>{scoreBand(result.signals.match, language)}</em></div><strong>{result.signals.match}<small>%</small></strong><p>{matchReason}</p><i><b style={{ width: `${result.signals.match}%` }} /></i></div>

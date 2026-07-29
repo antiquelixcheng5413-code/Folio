@@ -852,7 +852,10 @@ export async function runInfiniAnalysis(options: RunOptions) {
   }
 }
 
-export async function runInfiniJsonTask(prompt: string) {
+export async function runInfiniJsonTask(
+  prompt: string,
+  accept: (value: Record<string, unknown>) => boolean = () => true
+) {
   const { apiKey, baseUrl } = config();
   const connId = crypto.randomUUID();
   const controller = new AbortController();
@@ -899,7 +902,14 @@ export async function runInfiniJsonTask(prompt: string) {
     }
     for (const candidate of collected.reverse()) {
       const parsed = parseJsonCandidate(candidate);
-      if (parsed && typeof parsed === "object") return { taskId, result: parsed };
+      if (
+        parsed &&
+        typeof parsed === "object" &&
+        !Array.isArray(parsed) &&
+        accept(parsed as Record<string, unknown>)
+      ) {
+        return { taskId, result: parsed };
+      }
     }
     throw new Error("Agent 未返回可读取的结构化结果");
   } catch (error) {

@@ -34,6 +34,10 @@ export async function POST(request: Request) {
       content
     )
     .run();
+  await getD1()
+    .prepare("DELETE FROM notebook_translations WHERE meeting_id = ? AND session_id = ?")
+    .bind(payload.meetingId, session.sessionId)
+    .run();
   return json(
     {
       note: {

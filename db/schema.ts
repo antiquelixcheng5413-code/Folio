@@ -128,3 +128,13 @@ export const analysisTranslations = sqliteTable("analysis_translations", {
   resultJson: text("result_json").notNull(),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
+
+export const notebookTranslations = sqliteTable("notebook_translations", {
+  cacheKey: text("cache_key").primaryKey(),
+  meetingId: text("meeting_id").notNull(),
+  sessionId: text("session_id").notNull(),
+  language: text("language").notNull(),
+  sourceHash: text("source_hash").notNull(),
+  contentJson: text("content_json").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});

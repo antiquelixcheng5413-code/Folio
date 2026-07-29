@@ -24,7 +24,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 保持 JSON 字段名、schemaVersion、protocolVersion、数字、ID、时间码、decision、verdict、skill key/type/relation 与 formulaVersion 完全不变；只翻译 contentTitle、summary、evidence、各类 Reason、segments 中的 title/value/evidence/tags/locator 文字、newKnowledge、repeatedKnowledge、skillAssessment 中的 category/domain/name/description/prerequisites/evidence/learningOutcome，以及 personalization.basis。
 只输出完整严格 JSON，不要 Markdown。
 
-<UNTRUSTED_REPORT_JSON>${JSON.stringify(original)}</UNTRUSTED_REPORT_JSON>`);
+<UNTRUSTED_REPORT_JSON>${JSON.stringify(original)}</UNTRUSTED_REPORT_JSON>`,
+    (value) => value.schemaVersion === "xianjian.v1" && Array.isArray(value.segments)
+  );
   const translated = normalizeResult(task.result, original.totalDurationSeconds || row.durationSeconds, row.contentType);
   await db.prepare(`INSERT OR REPLACE INTO analysis_translations
     (analysis_id, session_id, language, result_json) VALUES (?, ?, ?, ?)`)
