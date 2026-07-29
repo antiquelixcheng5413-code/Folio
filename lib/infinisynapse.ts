@@ -904,48 +904,78 @@ export async function runInfiniJsonTask(
     let taskId = recursiveTaskId(createPayload) || "";
     const decoder = new TextDecoder();
     let buffer = "";
-    let completed = false;
-    while (!completed) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
-      const blocks = buffer.split("\n\n");
-      buffer = blocks.pop() || "";
-      for (const block of blocks) {
-        const dataText = block.split("\n").filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trimStart()).join("\n");
-        if (!dataText || dataText === "[DONE]") continue;
-        const payload = parseJsonCandidate(dataText) || dataText;
-        taskId ||= recursiveTaskId(payload) || "";
-        collectedValues.push(payload);
-        collected.push(...recursiveTexts(payload));
-        const serialized = typeof payload === "string" ? payload : JSON.stringify(payload);
-        if (serialized.includes("completion_result")) completed = true;
+    const readUntilCompletion = async () => {
+      let completed = false;
+      while (!completed) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+        const blocks = buffer.split("\n\n");
+        buffer = blocks.pop() || "";
+        for (const block of blocks) {
+          const dataText = block.split("\n").filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trimStart()).join("\n");
+          if (!dataText || dataText === "[DONE]") continue;
+          const payload = parseJsonCandidate(dataText) || dataText;
+          taskId ||= recursiveTaskId(payload) || "";
+          collectedValues.push(payload);
+          collected.push(...recursiveTexts(payload));
+          const serialized = typeof payload === "string" ? payload : JSON.stringify(payload);
+          if (serialized.includes("completion_result")) completed = true;
+        }
       }
-    }
-    if (taskId) {
+    };
+    const collectMessages = async () => {
+      if (!taskId) return;
       const messages = await apiJson<unknown>(`/api/ai_task/getUiMessageById?id=${encodeURIComponent(taskId)}`).catch(() => null);
       collectedValues.push(messages);
       collected.push(...recursiveTexts(messages));
-    }
-    const objects = [
-      ...collectedValues.slice().reverse().flatMap((value) => recursiveJsonObjects(value)),
-      ...collected.slice().reverse().flatMap((candidate) => recursiveJsonObjects(candidate)),
-    ];
-    for (const parsed of objects) {
-      if (accept(parsed)) return { taskId, result: parsed };
-    }
-    for (const candidate of collected.reverse()) {
-      const parsed = parseJsonCandidate(candidate);
-      if (
-        parsed &&
-        typeof parsed === "object" &&
-        !Array.isArray(parsed) &&
-        accept(parsed as Record<string, unknown>)
-      ) {
-        return { taskId, result: parsed };
+    };
+    const findAccepted = () => {
+      const objects = [
+        ...collectedValues.slice().reverse().flatMap((value) => recursiveJsonObjects(value)),
+        ...collected.slice().reverse().flatMap((candidate) => recursiveJsonObjects(candidate)),
+      ];
+      for (const parsed of objects) {
+        if (accept(parsed)) return parsed;
       }
-      const fallback = fromText?.(candidate);
-      if (fallback && accept(fallback)) return { taskId, result: fallback };
+      for (const candidate of collected.slice().reverse()) {
+        const parsed = parseJsonCandidate(candidate);
+        if (
+          parsed &&
+          typeof parsed === "object" &&
+          !Array.isArray(parsed) &&
+          accept(parsed as Record<string, unknown>)
+        ) return parsed as Record<string, unknown>;
+        const fallback = fromText?.(candidate);
+        if (fallback && accept(fallback)) return fallback;
+      }
+      return null;
+    };
+
+    await readUntilCompletion();
+    await collectMessages();
+    const firstResult = findAccepted();
+    if (firstResult) return { taskId, result: firstResult };
+
+    if (taskId) {
+      const continuation = await fetch(`${baseUrl}/api/ai/message`, {
+        method: "POST",
+        headers: headers(apiKey),
+        body: JSON.stringify({
+          type: "askResponse",
+          taskId,
+          connId,
+          askResponse: "messageResponse",
+          text: "上一条回复只是计划或未通过结构校验。现在请直接完成原任务；不要解释步骤，不要重复计划，只输出原任务要求的完整严格 JSON。",
+        }),
+        signal: controller.signal,
+      });
+      if (continuation.ok) {
+        await readUntilCompletion();
+        await collectMessages();
+        const repairedResult = findAccepted();
+        if (repairedResult) return { taskId, result: repairedResult };
+      }
     }
     throw new Error("Agent 未返回可读取的结构化结果");
   } catch (error) {
