@@ -877,7 +877,8 @@ export async function runInfiniAnalysis(options: RunOptions) {
 
 export async function runInfiniJsonTask(
   prompt: string,
-  accept: (value: Record<string, unknown>) => boolean = () => true
+  accept: (value: Record<string, unknown>) => boolean = () => true,
+  fromText?: (text: string) => Record<string, unknown> | null
 ) {
   const { apiKey, baseUrl } = config();
   const connId = crypto.randomUUID();
@@ -943,6 +944,8 @@ export async function runInfiniJsonTask(
       ) {
         return { taskId, result: parsed };
       }
+      const fallback = fromText?.(candidate);
+      if (fallback && accept(fallback)) return { taskId, result: fallback };
     }
     throw new Error("Agent 未返回可读取的结构化结果");
   } catch (error) {

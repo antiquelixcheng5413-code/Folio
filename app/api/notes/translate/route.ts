@@ -54,7 +54,21 @@ export async function POST(request: Request) {
 <NOTE_ITEMS>
 ${JSON.stringify(translatableItems).slice(0, 60000)}
 </NOTE_ITEMS>`,
-    (value) => Array.isArray(value.items) && value.items.length === translatableItems.length
+    (value) => Array.isArray(value.items) && value.items.length === translatableItems.length,
+    translatableItems.length === 1
+      ? (text) => {
+          const content = text
+            .replace(/^```(?:markdown|md)?\s*/i, "")
+            .replace(/```\s*$/i, "")
+            .trim();
+          if (
+            content.length < 40 ||
+            content.startsWith("{") ||
+            /completion_result|taskId|connId|NOTE_ITEMS/i.test(content)
+          ) return null;
+          return { items: [{ id: translatableItems[0].id, content }] };
+        }
+      : undefined
   );
   const translatedItems = Array.isArray((task.result as Record<string, unknown>).items)
     ? (task.result as { items: Array<{ id?: unknown; content?: unknown }> }).items
