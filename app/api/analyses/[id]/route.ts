@@ -3,6 +3,11 @@ import {
   recoverInfiniTask,
   requestInfiniRepair,
 } from "../../../../lib/infinisynapse";
+import {
+  recalculatePersonalMatch,
+  skillKey,
+  type StoredProfileSkill,
+} from "../../../../lib/personalization";
 import type { ContentType, XianjianAnalysisResult } from "../../../../lib/types";
 
 type AnalysisRow = {
@@ -33,6 +38,10 @@ function automaticNoteContent(result: XianjianAnalysisResult) {
     .map((segment) => `- ${segment.title}：${segment.value}${segment.evidence ? `（依据：${segment.evidence}）` : ""}`);
   const newKnowledge = result.newKnowledge.slice(0, 6).map((item) => `- ${item.topic}：${item.evidence}`);
   const repeated = result.repeatedKnowledge.slice(0, 4).map((item) => `- ${item.topic}：${item.evidence}`);
+  const professionalSkills = (result.skillAssessment?.skills || []).slice(0, 10).map(
+    (item) =>
+      `- ${item.domain}／${item.name}（${item.type}）：${item.description}；学完可做到：${item.learningOutcome}；覆盖 ${item.coverage}%，深度 ${item.depth}%`
+  );
   return [
     "# 核心结论",
     result.summary,
@@ -45,11 +54,19 @@ function automaticNoteContent(result: XianjianAnalysisResult) {
     "",
     "## 新增知识",
     ...(newKnowledge.length ? newKnowledge : ["- 暂无明确新增知识。"]),
+    "",
+    "## 专业技能点",
+    ...(professionalSkills.length
+      ? professionalSkills
+      : ["- 旧报告尚未包含专业技能点模型，可重新分析后生成。"]),
     ...(repeated.length ? ["", "## 已知或重复内容", ...repeated] : []),
     "",
     "## 判断依据",
     `- 匹配度 ${result.signals.match}%：${result.signals.matchReason}`,
     `- 内容含金量 ${result.signals.value}%：${result.signals.valueReason}`,
+    ...(result.personalization
+      ? [`- 动态匹配公式：${result.personalization.basis}`]
+      : []),
     "",
     "## 可继续追问",
     "- 哪个概念最值得深入？它与我已有知识有什么关系？",
@@ -190,6 +207,52 @@ export async function GET(
       }
     } catch {
       // Keep the durable local state and allow a later retry.
+    }
+  }
+
+  if (row.resultJson) {
+    const profileRows = await db
+      .prepare(`SELECT k.meeting_id AS meetingId, k.topic, k.skill_key AS skillKey,
+        k.domain, k.mastery_level AS mastery, k.confidence
+        FROM knowledge_items k JOIN meetings m ON m.id = k.meeting_id
+        WHERE k.session_id = ? AND k.meeting_id != ?
+        AND m.state IN ('shelved', 'later', 'completed')
+        ORDER BY k.created_at DESC LIMIT 200`)
+      .bind(session.sessionId, row.meetingId)
+      .all<{
+        meetingId: string;
+        topic: string;
+        skillKey: string;
+        domain: string;
+        mastery: number;
+        confidence: number;
+      }>();
+    const profileMap = new Map<string, StoredProfileSkill>();
+    for (const item of profileRows.results) {
+      const key = item.skillKey || skillKey(item.domain || "未分类", item.topic);
+      const previous = profileMap.get(key);
+      profileMap.set(key, {
+        meetingId: item.meetingId,
+        key,
+        name: item.topic,
+        domain: item.domain || "未分类",
+        mastery: Math.max(previous?.mastery || 0, Number(item.mastery || 0)),
+        confidence: Math.max(previous?.confidence || 0, Number(item.confidence || 0)),
+      });
+    }
+    const current = JSON.parse(row.resultJson) as XianjianAnalysisResult;
+    const personalized = recalculatePersonalMatch(current, [...profileMap.values()]);
+    const fingerprintChanged =
+      current.personalization?.profileFingerprint !==
+      personalized.personalization?.profileFingerprint;
+    const scoreChanged = current.signals.match !== personalized.signals.match;
+    if (fingerprintChanged || scoreChanged) {
+      row.resultJson = JSON.stringify(personalized);
+      await db
+        .prepare(`UPDATE analyses SET result_json = ?, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ? AND session_id = ?`)
+        .bind(row.resultJson, id, session.sessionId)
+        .run();
     }
   }
 

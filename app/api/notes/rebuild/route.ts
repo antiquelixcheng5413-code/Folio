@@ -16,9 +16,17 @@ function structuredNote(result: XianjianAnalysisResult) {
     "## 新增知识",
     ...(result.newKnowledge.length ? result.newKnowledge.slice(0, 7).map((item) => `- ${item.topic}：${item.evidence}`) : ["- 暂无明确新增知识。"]),
     "",
+    "## 专业技能点",
+    ...((result.skillAssessment?.skills || []).length
+      ? result.skillAssessment!.skills.slice(0, 10).map(
+          (item) => `- ${item.domain}／${item.name}：${item.description}；学习结果：${item.learningOutcome}；覆盖 ${item.coverage}%，深度 ${item.depth}%`
+        )
+      : ["- 旧报告尚未包含专业技能点模型，可重新分析后生成。"]),
+    "",
     "## 判断依据",
     `- 匹配度 ${result.signals.match}%：${result.signals.matchReason}`,
     `- 内容含金量 ${result.signals.value}%：${result.signals.valueReason}`,
+    ...(result.personalization ? [`- 动态匹配公式：${result.personalization.basis}`] : []),
     "",
     "## 可继续追问",
     "- 哪个概念最值得深入？它与我已有知识有什么关系？",

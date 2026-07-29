@@ -25,6 +25,44 @@ export interface KnowledgeItem {
   evidence: string;
 }
 
+export type SkillRelation = "new" | "reinforce" | "prerequisite" | "advanced";
+export type SkillType = "concept" | "method" | "tool" | "practice";
+
+export interface SkillPoint {
+  key: string;
+  domain: string;
+  name: string;
+  description: string;
+  type: SkillType;
+  relation: SkillRelation;
+  prerequisites: string[];
+  evidence: string[];
+  learningOutcome: string;
+  coverage: number;
+  depth: number;
+  relevance: number;
+  userMasteryBefore: number;
+  prerequisiteFit: number;
+  confidence: number;
+}
+
+export interface SkillAssessment {
+  protocolVersion: "peek.skill.v2";
+  domainSummary: string;
+  skills: SkillPoint[];
+}
+
+export interface PersonalizationScore {
+  formulaVersion: "peek.match.v2";
+  profileFingerprint: string;
+  evaluatedAt: string;
+  skillFit: number;
+  knowledgeGain: number;
+  difficultyFit: number;
+  valueMultiplier: number;
+  basis: string;
+}
+
 export interface XianjianAnalysisResult {
   schemaVersion: "xianjian.v1";
   contentTitle?: string;
@@ -44,6 +82,8 @@ export interface XianjianAnalysisResult {
   segments: AnalysisSegment[];
   newKnowledge: KnowledgeItem[];
   repeatedKnowledge: KnowledgeItem[];
+  skillAssessment?: SkillAssessment;
+  personalization?: PersonalizationScore;
   totalDurationSeconds: number;
   recommendedSeconds: number;
   savedSeconds: number;
@@ -55,4 +95,11 @@ export interface LearningProfile {
   project: string;
   knownTopics: string;
   preferences: string;
+  skills?: Array<{
+    key: string;
+    name: string;
+    domain: string;
+    mastery: number;
+    confidence: number;
+  }>;
 }

@@ -18,7 +18,11 @@ export async function GET(request: Request) {
   if (view === "knowledge") {
     const rows = await db
       .prepare(`SELECT k.id, k.meeting_id AS meetingId, k.analysis_id AS analysisId,
-        k.topic, k.status, k.evidence, k.created_at AS createdAt, m.title
+        k.topic, k.status, k.evidence, k.skill_key AS skillKey, k.domain,
+        k.skill_type AS skillType, k.description,
+        k.prerequisites_json AS prerequisitesJson,
+        k.mastery_level AS masteryLevel, k.confidence, k.coverage, k.depth,
+        k.source_value AS sourceValue, k.created_at AS createdAt, m.title
         FROM knowledge_items k JOIN meetings m ON m.id = k.meeting_id
         WHERE k.session_id = ?
         AND m.state IN ('shelved', 'later', 'completed')

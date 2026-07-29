@@ -3,8 +3,10 @@ import type {
   AnalysisSegment,
   ContentType,
   LearningProfile,
+  SkillPoint,
   XianjianAnalysisResult,
 } from "./types";
+import { skillKey } from "./personalization";
 
 const DEFAULT_BASE_URL = "https://app.infinisynapse.cn";
 
@@ -89,6 +91,7 @@ function buildPrompt(options: RunOptions) {
   const markerMatch = transcript.match(/^(VIDEO|ARTICLE|PAPER)_URL:([\s\S]+)$/);
   const sourceUrl = markerMatch?.[2]?.trim() || "";
   const typeLabel = contentType === "video" ? "视频" : contentType === "paper" ? "论文" : "文章";
+  const structuredSkills = JSON.stringify(profile.skills || [], null, 2);
   const contentInstruction = sourceUrl
     ? contentType === "video"
       ? `公开视频链接：${sourceUrl}
@@ -120,6 +123,8 @@ ${typeLabel}正文结束。请用原文小标题和短引文标记每个阅读�
 - 正在做的项目：${profile.project}
 - 已掌握主题：${profile.knownTopics}
 - 内容偏好：${profile.preferences}
+- 已有技能点（这是结构化画像；mastery 是 0-100 的掌握度估计，不等同于仅看过）：
+${structuredSkills}
 
 内容标题：${meetingTitle}
 ${contentInstruction}
@@ -129,12 +134,18 @@ ${contentInstruction}
    若这是第一次分析、画像尚未形成，匹配度应取中性值并说明“暂无足够历史”，不要把未知误判为高匹配或低匹配；含金量仍须独立正常评价。
 2. ${segmentRequirement}
 3. ${segmentEvidence}
-4. 区分新增知识与用户已掌握/重复知识。
-5. 将“匹配度”和“含金量”严格分开评分：
-   - 匹配度只衡量内容与用户当前方向、项目和技能树的相关程度。内容制作再精良，只要与用户目标无关，匹配度就应低。
+4. 执行“专业技能点抽取”，这是硬性要求，不得把视频标题、人物、事件结论或整句摘要直接当技能节点：
+   - 技能点必须是可学习、可练习、可迁移、可验证掌握程度的最小专业单元，例如“用数学归纳法证明递推恒等式”，而不是“某教授证明了某猜想”。
+   - 每个技能点必须明确专业领域、类型、前置技能、内容中可核验的证据、学完后能做什么，以及本内容覆盖深度。
+   - 相邻但不同层级的概念不能混成一个节点；同义词必须归一为稳定 key。
+   - 人物、奖项、产品名、新闻事实只能作为证据，不能单独成为 skill。
+   - 若内容只有事实介绍而没有可学习的方法或概念，应减少技能点数量并降低 confidence，禁止为了凑数生成节点。
+5. 区分新增知识与用户已掌握/重复知识，并用 skillAssessment.skills 表达真正的专业技能点。方法型内容通常应有 3-12 个；纯事实或资讯内容允许为 0，绝不凑数。
+6. 将“主题相关度”和“含金量”严格分开评分：
+   - signals.match 只提供本次 Agent 对“主题相关度”的初步判断，最终个性化匹配度由服务端使用统一公式重算。
    - 含金量不受用户画像影响，独立衡量信息密度、专业制作、原创洞察、可验证性与内容完整度。与用户目标不匹配的优质内容仍可获得高含金量。
    - 同时给出技术深度、推广含量、重复度、来源可靠度，所有分数均为 0-100。
-6. 在任务工作区写入文件 xianjian-result.json。最终回复也只输出同一份 JSON，不要 Markdown，不要解释。
+7. 在任务工作区写入文件 xianjian-result.json。最终回复也只输出同一份 JSON，不要 Markdown，不要解释。
 
 表达要求：
 - 所有用户可见文字使用简洁中文，直接说内容讲了什么、为什么有价值，避免出现 API、抓取过程、网站域名、工具调用和数据获取过程。
@@ -142,6 +153,7 @@ ${contentInstruction}
 - evidence 必须是 2-4 条可独立理解的内容精华，每条写成完整句子，不要罗列来源元数据。
 - matchReason 和 valueReason 各用一句通俗中文解释评分依据，不超过 45 字。
 - contentTitle 填写来源页面或原内容中实际出现的正式标题；无法确认时留空，禁止根据主题自行编造。
+- skillAssessment.skills 中的 coverage 表示内容覆盖充分度，depth 表示专业深度，relevance 表示与当前画像目标的主题相关度，userMasteryBefore 表示分析前掌握度，prerequisiteFit 表示前置知识适配度，confidence 表示抽取可信度。全部为 0-100。
 
 JSON 必须严格符合以下结构：
 {
@@ -175,6 +187,27 @@ JSON 必须严格符合以下结构：
       "pageNumber": 1
     }
   }],
+  "skillAssessment": {
+    "protocolVersion": "peek.skill.v2",
+    "domainSummary": "这份内容覆盖的专业领域与知识层级",
+    "skills": [{
+      "key": "规范化稳定键，例如 mathematics-induction-proof",
+      "domain": "专业领域，例如 数学/离散数学",
+      "name": "可学习且可验证的具体技能点",
+      "description": "该技能解决什么问题，边界是什么",
+      "type": "concept | method | tool | practice",
+      "relation": "new | reinforce | prerequisite | advanced",
+      "prerequisites": ["前置技能"],
+      "evidence": ["内容中的具体论述、推导或演示依据"],
+      "learningOutcome": "学完后用户能够完成的具体任务",
+      "coverage": 0,
+      "depth": 0,
+      "relevance": 0,
+      "userMasteryBefore": 0,
+      "prerequisiteFit": 0,
+      "confidence": 0
+    }]
+  },
   "newKnowledge": [{"topic": "主题", "evidence": "依据"}],
   "repeatedKnowledge": [{"topic": "主题", "evidence": "依据"}]
 }`;
@@ -367,6 +400,58 @@ export function normalizeResult(
       }))
       .filter((item) => item.topic);
 
+  const rawSkillAssessment =
+    raw.skillAssessment && typeof raw.skillAssessment === "object"
+      ? (raw.skillAssessment as Record<string, unknown>)
+      : {};
+  const hasSkillAssessment = Boolean(
+    raw.skillAssessment && typeof raw.skillAssessment === "object"
+  );
+  const skills = (Array.isArray(rawSkillAssessment.skills) ? rawSkillAssessment.skills : [])
+    .filter((item) => item && typeof item === "object")
+    .map((item, index) => {
+      const record = item as Record<string, unknown>;
+      const domain = String(record.domain || "未分类").trim().slice(0, 80);
+      const name = String(record.name || "").trim().slice(0, 120);
+      if (!name) return null;
+      const type = ["concept", "method", "tool", "practice"].includes(String(record.type))
+        ? String(record.type) as SkillPoint["type"]
+        : "concept";
+      const relation = ["new", "reinforce", "prerequisite", "advanced"].includes(String(record.relation))
+        ? String(record.relation) as SkillPoint["relation"]
+        : "new";
+      const evidence = Array.isArray(record.evidence)
+        ? record.evidence.map(String).map((value) => value.trim()).filter(Boolean).slice(0, 6)
+        : [];
+      const description = String(record.description || "").trim().slice(0, 500);
+      const learningOutcome = String(record.learningOutcome || "").trim().slice(0, 500);
+      if (!description || !learningOutcome || !evidence.length || name.length > 80) return null;
+      return {
+        key: String(record.key || skillKey(domain, name) || `skill-${index + 1}`).slice(0, 160),
+        domain,
+        name,
+        description,
+        type,
+        relation,
+        prerequisites: Array.isArray(record.prerequisites)
+          ? record.prerequisites.map(String).map((value) => value.trim()).filter(Boolean).slice(0, 8)
+          : [],
+        evidence,
+        learningOutcome,
+        coverage: score(record.coverage),
+        depth: score(record.depth),
+        relevance: score(record.relevance),
+        userMasteryBefore: score(record.userMasteryBefore),
+        prerequisiteFit: score(record.prerequisiteFit),
+        confidence: score(record.confidence),
+      } satisfies SkillPoint;
+    })
+    .filter(Boolean) as SkillPoint[];
+  const rawPersonalization =
+    raw.personalization && typeof raw.personalization === "object"
+      ? (raw.personalization as Record<string, unknown>)
+      : null;
+
   return {
     schemaVersion: "xianjian.v1",
     ...(String(raw.contentTitle || "").trim()
@@ -388,6 +473,32 @@ export function normalizeResult(
     segments,
     newKnowledge: knowledge(raw.newKnowledge),
     repeatedKnowledge: knowledge(raw.repeatedKnowledge),
+    ...(hasSkillAssessment
+      ? {
+          skillAssessment: {
+            protocolVersion: "peek.skill.v2" as const,
+            domainSummary: String(rawSkillAssessment.domainSummary || "").trim().slice(0, 500),
+            skills,
+          },
+        }
+      : {}),
+    ...(rawPersonalization?.formulaVersion === "peek.match.v2"
+      ? {
+          personalization: {
+            formulaVersion: "peek.match.v2" as const,
+            profileFingerprint: String(rawPersonalization.profileFingerprint || ""),
+            evaluatedAt: String(rawPersonalization.evaluatedAt || ""),
+            skillFit: score(rawPersonalization.skillFit),
+            knowledgeGain: score(rawPersonalization.knowledgeGain),
+            difficultyFit: score(rawPersonalization.difficultyFit),
+            valueMultiplier: Math.max(
+              0,
+              Math.min(1, Number(rawPersonalization.valueMultiplier) || 0)
+            ),
+            basis: String(rawPersonalization.basis || ""),
+          },
+        }
+      : {}),
     totalDurationSeconds,
     recommendedSeconds,
     savedSeconds: Math.max(0, totalDurationSeconds - recommendedSeconds),

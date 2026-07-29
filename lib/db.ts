@@ -92,6 +92,16 @@ export async function ensureSchema() {
         topic TEXT NOT NULL,
         status TEXT NOT NULL,
         evidence TEXT NOT NULL DEFAULT '',
+        skill_key TEXT NOT NULL DEFAULT '',
+        domain TEXT NOT NULL DEFAULT '',
+        skill_type TEXT NOT NULL DEFAULT 'concept',
+        description TEXT NOT NULL DEFAULT '',
+        prerequisites_json TEXT NOT NULL DEFAULT '[]',
+        mastery_level INTEGER NOT NULL DEFAULT 0,
+        confidence INTEGER NOT NULL DEFAULT 0,
+        coverage INTEGER NOT NULL DEFAULT 0,
+        depth INTEGER NOT NULL DEFAULT 0,
+        source_value INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
       )`),
       db.prepare(`CREATE TABLE IF NOT EXISTS discovery_candidates (
@@ -158,6 +168,16 @@ export async function ensureSchema() {
       "ALTER TABLE workspace_settings ADD COLUMN auto_discover_videos INTEGER NOT NULL DEFAULT 0",
       "ALTER TABLE workspace_settings ADD COLUMN auto_analyze_discoveries INTEGER NOT NULL DEFAULT 0",
       "ALTER TABLE workspace_settings ADD COLUMN title_mode TEXT NOT NULL DEFAULT 'automatic'",
+      "ALTER TABLE knowledge_items ADD COLUMN skill_key TEXT NOT NULL DEFAULT ''",
+      "ALTER TABLE knowledge_items ADD COLUMN domain TEXT NOT NULL DEFAULT ''",
+      "ALTER TABLE knowledge_items ADD COLUMN skill_type TEXT NOT NULL DEFAULT 'concept'",
+      "ALTER TABLE knowledge_items ADD COLUMN description TEXT NOT NULL DEFAULT ''",
+      "ALTER TABLE knowledge_items ADD COLUMN prerequisites_json TEXT NOT NULL DEFAULT '[]'",
+      "ALTER TABLE knowledge_items ADD COLUMN mastery_level INTEGER NOT NULL DEFAULT 0",
+      "ALTER TABLE knowledge_items ADD COLUMN confidence INTEGER NOT NULL DEFAULT 0",
+      "ALTER TABLE knowledge_items ADD COLUMN coverage INTEGER NOT NULL DEFAULT 0",
+      "ALTER TABLE knowledge_items ADD COLUMN depth INTEGER NOT NULL DEFAULT 0",
+      "ALTER TABLE knowledge_items ADD COLUMN source_value INTEGER NOT NULL DEFAULT 0",
     ]) {
       try {
         await db.prepare(statement).run();

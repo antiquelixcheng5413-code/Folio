@@ -1,5 +1,6 @@
 import { getD1, getSession, sha256 } from "../../../../../lib/db";
 import { startInfiniTask } from "../../../../../lib/infinisynapse";
+import { skillKey } from "../../../../../lib/personalization";
 import type { ContentType, LearningProfile } from "../../../../../lib/types";
 
 type MeetingRow = {
@@ -9,7 +10,10 @@ type MeetingRow = {
   transcriptHash: string;
   durationSeconds: number;
   contentType: ContentType;
+  videoUrl: string | null;
 };
+
+const ANALYSIS_PROTOCOL_VERSION = "peek.analysis.v2";
 
 function sse(controller: ReadableStreamDefaultController, event: string, data: unknown) {
   controller.enqueue(
@@ -26,7 +30,7 @@ export async function POST(
   const db = getD1();
   const meeting = await db
     .prepare(`SELECT id, title, transcript, transcript_hash AS transcriptHash,
-      content_type AS contentType,
+      content_type AS contentType, video_url AS videoUrl,
       duration_seconds AS durationSeconds
       FROM meetings WHERE id = ? AND session_id = ?`)
     .bind(id, session.sessionId)
@@ -37,20 +41,41 @@ export async function POST(
       headers: { "content-type": "application/json", ...(session.cookie ? { "set-cookie": session.cookie } : {}) },
     });
   }
-  if (!meeting.transcript || meeting.transcript.startsWith("[已按隐私策略清理]")) {
-    return new Response(JSON.stringify({ error: "原字幕已清理，不能重复发起新分析" }), {
+  const analysisTranscript =
+    meeting.transcript && !meeting.transcript.startsWith("[已按隐私策略清理]")
+      ? meeting.transcript
+      : meeting.videoUrl
+        ? `${meeting.contentType.toUpperCase()}_URL:${meeting.videoUrl}`
+        : "";
+  if (!analysisTranscript) {
+    return new Response(JSON.stringify({ error: "原文已按隐私策略清理且没有保存公开链接，无法重新分析" }), {
       status: 409,
       headers: { "content-type": "application/json", ...(session.cookie ? { "set-cookie": session.cookie } : {}) },
     });
   }
   const learned = await db
-    .prepare(`SELECT k.topic, k.status, k.evidence
+    .prepare(`SELECT k.topic, k.status, k.evidence, k.skill_key AS skillKey,
+      k.domain, k.mastery_level AS mastery, k.confidence
       FROM knowledge_items k JOIN meetings m ON m.id = k.meeting_id
       WHERE k.session_id = ? AND m.state IN ('shelved', 'later', 'completed')
+      AND m.id != ?
       ORDER BY k.created_at DESC LIMIT 60`)
-    .bind(session.sessionId)
-    .all<{ topic: string; status: string; evidence: string }>();
+    .bind(session.sessionId, meeting.id)
+    .all<{ topic: string; status: string; evidence: string; skillKey: string; domain: string; mastery: number; confidence: number }>();
   const learnedTopics = [...new Set(learned.results.map((item) => item.topic).filter(Boolean))];
+  const profileSkillMap = new Map<string, NonNullable<LearningProfile["skills"]>[number]>();
+  for (const item of learned.results) {
+    const key = item.skillKey || skillKey(item.domain || "未分类", item.topic);
+    const previous = profileSkillMap.get(key);
+    const next = {
+      key,
+      name: item.topic,
+      domain: item.domain || "未分类",
+      mastery: Math.max(Number(previous?.mastery || 0), Number(item.mastery || 0)),
+      confidence: Math.max(Number(previous?.confidence || 0), Number(item.confidence || 0)),
+    };
+    profileSkillMap.set(key, next);
+  }
   const profile: LearningProfile = {
     direction: learnedTopics.length
       ? `从已入架内容累计的主题：${learnedTopics.slice(0, 10).join("、")}`
@@ -61,6 +86,7 @@ export async function POST(
     project: "根据已入架内容持续推断，不要求用户手动维护",
     knownTopics: learnedTopics.join("、") || "暂无",
     preferences: "优先信息密度高、来源可信、少推广和少重复的内容",
+    skills: [...profileSkillMap.values()].slice(0, 60),
   };
   const today = await db
     .prepare(`SELECT COUNT(*) AS count FROM analyses
@@ -74,7 +100,7 @@ export async function POST(
     });
   }
   const inputHash = await sha256(
-    `${meeting.transcriptHash}:${profile.direction}:${profile.level}:${profile.project}:${profile.knownTopics}:${profile.preferences}`
+    `${ANALYSIS_PROTOCOL_VERSION}:${meeting.transcriptHash}:${profile.direction}:${profile.level}:${profile.project}:${profile.knownTopics}:${profile.preferences}:${JSON.stringify(profile.skills || [])}`
   );
   const duplicate = await db
     .prepare(`SELECT id, status, task_id AS taskId, result_json AS resultJson
@@ -124,7 +150,7 @@ export async function POST(
           .run();
         const run = await startInfiniTask({
           connId,
-          transcript: meeting.transcript,
+          transcript: analysisTranscript,
           meetingTitle: meeting.title,
           profile,
           durationSeconds: meeting.durationSeconds,

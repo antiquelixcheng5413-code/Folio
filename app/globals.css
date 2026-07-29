@@ -284,6 +284,10 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .dynamic-skill-node.mastered > i { background: #e7e9ed; color: var(--navy-2); }
 .dynamic-skill-node strong { display: block; margin-top: 2px; font-size: 10px; }
 .dynamic-skill-node p { margin: 6px 0 0; color: var(--muted); font-size: 8px; line-height: 1.55; }
+.dynamic-skill-node .skill-domain { display: block; color: var(--sage); font-size: 6px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.skill-mastery-bar { height: 4px; margin: 9px 0 5px; overflow: hidden; border-radius: 4px; background: #e7e4db; }
+.skill-mastery-bar b { height: 100%; display: block; border-radius: inherit; background: var(--sage); }
+.dynamic-skill-node div > small:last-child { color: var(--muted); font-size: 6px; }
 .dynamic-skill-node > span { padding: 4px 7px; border-radius: 7px; background: var(--sage-pale); color: var(--sage); font-size: 7px; font-weight: 700; }
 .dynamic-skill-node.mastered > span { background: #e7e9ed; color: var(--navy-2); }
 .dynamic-focus { min-height: 250px; }
@@ -431,6 +435,15 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .value-score > strong { color: var(--sage); }
 .value-score > i b { background: var(--sage); }
 .score-details { padding: 9px 18px 11px; display: grid; }
+.match-formula { margin: 12px; padding: 12px; border: 1px solid #dce4d8; border-radius: 12px; background: #f3f6ef; }
+.match-formula > strong { display: block; color: var(--navy-2); font-size: 8px; }
+.match-formula > p { margin: 5px 0 10px; color: var(--muted); font-size: 7px; line-height: 1.5; }
+.match-formula > div { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.match-formula > div span { padding: 7px; border-radius: 8px; background: rgba(255,255,255,.72); }
+.match-formula small, .match-formula b { display: block; }
+.match-formula small { color: var(--muted); font-size: 6px; }
+.match-formula b { margin-top: 3px; font-size: 9px; }
+.match-formula code { display: block; margin-top: 9px; color: var(--sage); font-size: 7px; }
 .score-details > div { min-height: 27px; display: flex; align-items: center; justify-content: space-between; font-size: 7px; }
 .score-details span { color: var(--muted); }
 .score-details b { color: var(--navy); }
@@ -652,7 +665,7 @@ html[data-font-size="large"] .app-shell { min-height: calc(100vh / 1.12); }
 .skill-donut small { color: var(--muted); font-size: 7px; }
 .skill-chart-legend { display: flex; justify-content: center; gap: 14px; }
 .skill-chart-legend span { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 8px; }
-.skill-chart-legend i { width: 8px; height: 8px; border-radius: 50%; }
+.skill-chart-legend i { width: 8px; height: 8px; border-radius: 50%; background: #d8d5cc; }
 .skill-chart-legend i.known { background: var(--sage); }
 .skill-chart-legend i.fresh { background: var(--clay); }
 .knowledge-tree { margin-top: 10px; overflow: hidden; }
@@ -666,6 +679,7 @@ html[data-font-size="large"] .app-shell { min-height: calc(100vh / 1.12); }
 .tree-node.tone-1 > i { background: var(--clay); }
 .tree-node.tone-2 > i { background: var(--navy-2); }
 .tree-node span { overflow: hidden; font-size: 8px; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
+.tree-node span b { display: block; margin-bottom: 3px; color: var(--muted); font-size: 6px; font-weight: 700; }
 .tree-node small { color: var(--muted); font-size: 6px; }
 
 .notebook-groups { display: grid; gap: 12px; padding-top: 16px; }

@@ -78,6 +78,16 @@ export const knowledgeItems = sqliteTable("knowledge_items", {
   topic: text("topic").notNull(),
   status: text("status").notNull(),
   evidence: text("evidence").notNull().default(""),
+  skillKey: text("skill_key").notNull().default(""),
+  domain: text("domain").notNull().default(""),
+  skillType: text("skill_type").notNull().default("concept"),
+  description: text("description").notNull().default(""),
+  prerequisitesJson: text("prerequisites_json").notNull().default("[]"),
+  masteryLevel: integer("mastery_level").notNull().default(0),
+  confidence: integer("confidence").notNull().default(0),
+  coverage: integer("coverage").notNull().default(0),
+  depth: integer("depth").notNull().default(0),
+  sourceValue: integer("source_value").notNull().default(0),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 

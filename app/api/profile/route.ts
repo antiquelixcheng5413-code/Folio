@@ -14,7 +14,7 @@ export async function GET(request: Request) {
 export async function PATCH(request: Request) {
   const session = await getSession(request);
   const payload = (await request.json()) as Partial<LearningProfile>;
-  const fields: (keyof LearningProfile)[] = [
+  const fields: Array<Exclude<keyof LearningProfile, "skills">> = [
     "direction",
     "level",
     "project",
