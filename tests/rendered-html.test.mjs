@@ -138,6 +138,7 @@ assert.match(client, /titleMode/);
   assert.match(learningAssistant, /buildLearningQaPrompt/);
   assert.match(learningAssistant, /SOURCE_TEXT/);
   assert.match(learningAssistant, /用户不需要写提示词/);
+  assert.match(learningAssistant, /完整翻译/);
   assert.match(notebook, /buildStructuredNote/);
   assert.doesNotMatch(notebook, /matchReason/);
   assert.match(notesAsk, /answerLearningQuestion/);
