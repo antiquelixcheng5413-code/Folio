@@ -9,9 +9,6 @@ const { r2 } = hostingConfig;
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 
 const localBindingConfig = {
-  main: "./worker/index.ts",
-  compatibility_flags: ["nodejs_compat"],
-  triggers: { crons: ["17 * * * *"] },
   r2_buckets: r2
     ? [
         {
