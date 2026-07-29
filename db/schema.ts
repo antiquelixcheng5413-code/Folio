@@ -108,3 +108,11 @@ export const authUsers = sqliteTable("auth_users", {
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
+
+export const analysisTranslations = sqliteTable("analysis_translations", {
+  analysisId: text("analysis_id").notNull(),
+  sessionId: text("session_id").notNull(),
+  language: text("language").notNull(),
+  resultJson: text("result_json").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});

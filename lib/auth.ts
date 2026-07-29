@@ -109,6 +109,7 @@ export async function bindInfiniUser(currentSessionId: string, user: InfiniUser)
       db.prepare("UPDATE notes SET session_id = ? WHERE session_id = ?").bind(targetSessionId, currentSessionId),
       db.prepare("UPDATE knowledge_items SET session_id = ? WHERE session_id = ?").bind(targetSessionId, currentSessionId),
       db.prepare("UPDATE discovery_candidates SET session_id = ? WHERE session_id = ?").bind(targetSessionId, currentSessionId),
+      db.prepare("UPDATE analysis_translations SET session_id = ? WHERE session_id = ?").bind(targetSessionId, currentSessionId),
     ]);
   }
 
@@ -143,4 +144,3 @@ export async function bindInfiniUser(currentSessionId: string, user: InfiniUser)
 export function sessionCookie(sessionId: string) {
   return `xianjian_session=${encodeURIComponent(sessionId)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`;
 }
-

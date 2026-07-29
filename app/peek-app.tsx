@@ -20,6 +20,7 @@ type Analysis = {
   taskId: string | null;
   errorMessage?: string | null;
   result: XianjianAnalysisResult | null;
+  createdAt?: string;
 };
 type MeetingItem = {
   id: string;
@@ -92,6 +93,7 @@ function analysisPreview(item: MeetingItem, language: Language): Analysis {
       : (language === "zh" ? "真实任务运行中，可刷新恢复" : "The task is running and survives refresh"));
   return {
     id: item.analysisId || "",
+    createdAt: item.createdAt,
     meetingId: item.id,
     meetingState: item.state,
     title: item.title,
@@ -243,12 +245,12 @@ function PeekMark({ compact = false }: { compact?: boolean }) {
 
 function NavIcon({ kind }: { kind: "home" | "tasks" | "later" | "history" | "notes" | "skills" }) {
   const paths = {
-    home: <><path d="M4 10.8 12 4l8 6.8V20H4z" /><path d="M9 20v-6h6v6" /></>,
-    tasks: <><circle cx="12" cy="12" r="8" /><path d="M12 7v5l3 2" /></>,
-    later: <path d="M6 3h12v18l-6-4-6 4z" />,
-    history: <><path d="M4 12a8 8 0 1 0 2.3-5.7L4 8.6" /><path d="M4 4v4.6h4.6M12 8v5l3 2" /></>,
-    notes: <><path d="M5 3h11l3 3v15H5z" /><path d="M9 9h6M9 13h6M9 17h4" /></>,
-    skills: <><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z" /><path d="M8 4v16M12 8h4" /></>,
+    home: <><rect x="4" y="4" width="6" height="6" rx="1" /><rect x="14" y="4" width="6" height="6" rx="1" /><rect x="4" y="14" width="6" height="6" rx="1" /><rect x="14" y="14" width="6" height="6" rx="1" /></>,
+    tasks: <><path d="M5 6h9M5 12h14M5 18h11" /><path d="m16 4 4 2-4 2z" /></>,
+    later: <><path d="M6 3h12v18l-6-4-6 4z" /><path d="M9 8h6" /></>,
+    history: <><rect x="4" y="5" width="16" height="15" rx="2" /><path d="M8 3v4M16 3v4M4 10h16M8 14h2M14 14h2" /></>,
+    notes: <><path d="M5 3h11l3 3v15H5z" /><path d="M16 3v4h4M9 11h6M9 15h6M9 19h4" /></>,
+    skills: <><circle cx="12" cy="5" r="2" /><circle cx="6" cy="18" r="2" /><circle cx="18" cy="18" r="2" /><path d="M12 7v4M12 11 6 16M12 11l6 5" /></>,
   };
   return <svg viewBox="0 0 24 24" aria-hidden="true">{paths[kind]}</svg>;
 }
@@ -258,6 +260,7 @@ export default function PeekApp() {
   const [previousView, setPreviousView] = useState<View>("home");
   const [language, setLanguage] = useState<Language>("zh");
   const [languageOpen, setLanguageOpen] = useState(false);
+  const [fontSize, setFontSize] = useState<"small" | "medium" | "large">("medium");
   const [query, setQuery] = useState("");
   const [meetings, setMeetings] = useState<MeetingItem[]>([]);
   const [knowledge, setKnowledge] = useState<Record<string, unknown>[]>([]);
@@ -284,6 +287,15 @@ export default function PeekApp() {
   const restoredOnLoad = useRef(false);
   const analysisRequestVersion = useRef(0);
   const t = copy[language];
+
+  useEffect(() => {
+    const saved = window.localStorage.getItem("peek-font-size");
+    if (saved === "small" || saved === "medium" || saved === "large") setFontSize(saved);
+  }, []);
+  useEffect(() => {
+    document.documentElement.dataset.fontSize = fontSize;
+    window.localStorage.setItem("peek-font-size", fontSize);
+  }, [fontSize]);
 
   const notify = useCallback((message: string) => {
     setToast(message);
@@ -516,6 +528,7 @@ export default function PeekApp() {
       progressText: `正在保存${contentTypeLabel(contentType, "zh")}链接`,
       taskId: null,
       result: null,
+      createdAt: new Date().toISOString(),
     });
     try {
       const meetingPayload = await api<{ meeting: { id: string; title: string; source: string; contentType: ContentType; contentUrl?: string | null; videoUrl?: string | null } }>(
@@ -658,7 +671,7 @@ export default function PeekApp() {
   }
 
   return (
-    <div className="app-shell final-ui">
+    <div className={`app-shell final-ui font-${fontSize}`}>
       <aside className="sidebar">
         <button className="brand" onClick={() => navigate("home")} aria-label={t.home}>
           <PeekMark />
@@ -684,7 +697,10 @@ export default function PeekApp() {
         </div>
         <div className="profile-chip">
           <button className="profile-identity-button" onClick={() => navigate("settings")} aria-label={t.settings}>
-            <span>匿</span><div><strong>{language === "zh" ? "匿名用户" : "Anonymous user"}</strong><small>{language === "zh" ? "个人信息与设置" : "Personal info & settings"}</small></div>
+            {authStatus.authenticated && authStatus.user?.avatar
+              ? <img src={authStatus.user.avatar} alt="" referrerPolicy="no-referrer" />
+              : <span>{authStatus.authenticated ? (authStatus.user?.nickname || authStatus.user?.email || "P").slice(0, 1).toUpperCase() : (language === "zh" ? "访" : "G")}</span>}
+            <div><strong>{authStatus.authenticated ? (authStatus.user?.nickname || authStatus.user?.email || (language === "zh" ? "已登录用户" : "Signed-in user")) : (language === "zh" ? "访客" : "Guest")}</strong><small>{authStatus.authenticated ? (language === "zh" ? "已同步学习空间" : "Workspace synced") : (language === "zh" ? "登录可跨设备同步" : "Sign in to sync")}</small></div>
           </button>
           <button className="settings-trigger" onClick={() => navigate("settings")} aria-label={t.settings} title={t.settings}>•••</button>
         </div>
@@ -707,6 +723,9 @@ export default function PeekApp() {
                   <button onClick={() => { setLanguage("en"); setLanguageOpen(false); }}>English</button>
                 </div>
               )}
+            </div>
+            <div className="font-size-control" role="group" aria-label={language === "zh" ? "字体大小" : "Font size"}>
+              {(["small", "medium", "large"] as const).map((size, index) => <button key={size} className={fontSize === size ? "active" : ""} onClick={() => setFontSize(size)} title={language === "zh" ? ["小号字体", "标准字体", "大号字体"][index] : ["Small text", "Standard text", "Large text"][index]}><span>A</span>{index === 0 ? "−" : index === 2 ? "+" : ""}</button>)}
             </div>
             <div className="task-list-wrap">
               <button className={`task-list-trigger ${activeTaskCount ? "has-active" : ""}`} onClick={() => setTaskListOpen((open) => !open)} aria-expanded={taskListOpen} aria-label={language === "zh" ? `运行中任务 ${activeTaskCount} 项` : `${activeTaskCount} active tasks`}><span>◷</span><b>{language === "zh" ? "运行中" : "Running"}</b><i>{activeTaskCount}</i></button>
@@ -963,6 +982,21 @@ function NotesView({ language, items, onChanged }: { language: Language; items: 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [rebuildBusy, setRebuildBusy] = useState(false);
+  const [openMeetingId, setOpenMeetingId] = useState<string | null>(items[0]?.meetingId || null);
+  const groups = useMemo(() => {
+    const map = new Map<string, { meetingId: string; title: string; items: NoteItem[]; updatedAt: string }>();
+    for (const item of items) {
+      const group = map.get(item.meetingId) || { meetingId: item.meetingId, title: item.title, items: [], updatedAt: item.updatedAt || item.createdAt };
+      group.items.push(item);
+      if ((item.updatedAt || item.createdAt) > group.updatedAt) group.updatedAt = item.updatedAt || item.createdAt;
+      map.set(item.meetingId, group);
+    }
+    return [...map.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }, [items]);
+  useEffect(() => {
+    if (!openMeetingId && groups.length) setOpenMeetingId(groups[0].meetingId);
+  }, [groups, openMeetingId]);
 
   const save = async (item: NoteItem) => {
     if (!draft.trim()) return;
@@ -1011,53 +1045,66 @@ function NotesView({ language, items, onChanged }: { language: Language; items: 
   return (
     <section className="page page-view notes-page">
       <div className="page-title"><div><span className="eyebrow">TIMESTAMP NOTEBOOK</span><h1>{copy[language].notes}</h1><p>{language === "zh" ? "所有在分析片段下写过的时间码笔记，都集中保存在这里。" : "Every timestamp note written under an analyzed segment is collected here."}</p></div><div className="saved-pill"><span>{language === "zh" ? "笔记总数" : "TOTAL NOTES"}</span><strong>{items.length}</strong></div></div>
-      <article className="content-panel notes-panel">
-        <div className="section-head border-bottom"><div><h2>{language === "zh" ? "我的笔记本" : "My notebook"}</h2><p>{language === "zh" ? "按最近修改排序" : "Sorted by latest edit"}</p></div><button className="outline-button export-notes" disabled={!items.length} onClick={exportNotebook}>{language === "zh" ? "导出 Markdown" : "Export Markdown"}</button></div>
+      <article className="content-panel notes-panel notebook-library">
+        <div className="section-head border-bottom"><div><h2>{language === "zh" ? "我的笔记本" : "My notebook"}</h2><p>{language === "zh" ? "同一内容的总结与边栏批注封装在一起" : "Summary and margin notes are grouped by content"}</p></div><div className="notebook-toolbar"><button className="outline-button export-notes" disabled={!openMeetingId || rebuildBusy} onClick={async () => { if (!openMeetingId) return; setRebuildBusy(true); try { await api("/api/notes/rebuild", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ meetingId: openMeetingId }) }); await onChanged(); } finally { setRebuildBusy(false); } }}>{rebuildBusy ? (language === "zh" ? "整理中…" : "Rebuilding…") : (language === "zh" ? "重建核心笔记" : "Rebuild core note")}</button><button className="outline-button export-notes" disabled={!items.length} onClick={exportNotebook}>{language === "zh" ? "导出 Markdown" : "Export Markdown"}</button></div></div>
         {!items.length && <div className="notes-empty"><span>✎</span><h2>{language === "zh" ? "还没有笔记" : "No notes yet"}</h2><p>{language === "zh" ? "先打开一条内容的分析路线，在任意片段下添加笔记。" : "Open an analysis route and add a note under any segment."}</p></div>}
-        <div className="note-list">
-          {items.map((item) => (
-            <article className="note-entry" key={item.id}>
-              <div className="note-time">{item.timecodeSeconds == null ? "—" : timecode(item.timecodeSeconds)}</div>
-              <div className="note-body">
-                <span>{item.title}</span>
-                {editingId === item.id ? (
-                  <textarea value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={4000} autoFocus />
-                ) : (
-                  <p>{item.content}</p>
-                )}
-                <small>{new Date(item.updatedAt || item.createdAt).toLocaleString(language === "zh" ? "zh-CN" : "en-US", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}</small>
-              </div>
-              <div className="note-actions">
-                {editingId === item.id ? (
-                  <>
-                    <button disabled={busyId === item.id || !draft.trim()} onClick={() => save(item)}>{language === "zh" ? "保存" : "Save"}</button>
-                    <button className="ghost-action" onClick={() => setEditingId(null)}>{language === "zh" ? "取消" : "Cancel"}</button>
-                  </>
-                ) : (
-                  <>
-                    <button onClick={() => { setEditingId(item.id); setDraft(item.content); }}>{language === "zh" ? "编辑" : "Edit"}</button>
-                    <button className="ghost-action danger" disabled={busyId === item.id} onClick={() => remove(item)}>{language === "zh" ? "删除" : "Delete"}</button>
-                  </>
-                )}
-              </div>
-            </article>
-          ))}
+        <div className="notebook-groups">
+          {groups.map((group) => {
+            const open = openMeetingId === group.meetingId;
+            const summary = group.items.find((item) => item.segmentId?.startsWith("analysis-summary:")) || group.items[0];
+            return <article className={`notebook-document ${open ? "open" : ""}`} key={group.meetingId}><button className="notebook-cover" onClick={() => setOpenMeetingId(open ? null : group.meetingId)}><span className="notebook-icon">▤</span><div><strong>{group.title}</strong><small>{group.items.length} {language === "zh" ? "条批注" : "annotations"} · {new Date(group.updatedAt).toLocaleDateString(language === "zh" ? "zh-CN" : "en-US")}</small><p>{summary.content.replace(/^#+.*$/gm, "").trim().slice(0, 120)}</p></div><i>{open ? "−" : "+"}</i></button>{open && <div className="notebook-pages"><aside className="notebook-margin"><span>{language === "zh" ? "边栏批注" : "MARGIN NOTES"}</span>{group.items.filter((item) => item.timecodeSeconds != null).map((item) => <button key={item.id} onClick={() => document.getElementById(`note-${item.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" })}>{timecode(item.timecodeSeconds || 0)}</button>)}</aside><div className="note-list grouped">{group.items.map((item) => <article className={`note-entry ${item.segmentId?.startsWith("analysis-summary:") ? "summary-note" : ""}`} id={`note-${item.id}`} key={item.id}><div className="note-time">{item.timecodeSeconds == null ? (item.segmentId?.startsWith("analysis-summary:") ? "总" : "—") : timecode(item.timecodeSeconds)}</div><div className="note-body">{editingId === item.id ? <textarea value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={4000} autoFocus /> : <p>{item.content}</p>}<small>{new Date(item.updatedAt || item.createdAt).toLocaleString(language === "zh" ? "zh-CN" : "en-US", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}</small></div><div className="note-actions">{editingId === item.id ? <><button disabled={busyId === item.id || !draft.trim()} onClick={() => save(item)}>{language === "zh" ? "保存" : "Save"}</button><button className="ghost-action" onClick={() => setEditingId(null)}>{language === "zh" ? "取消" : "Cancel"}</button></> : <><button onClick={() => { setEditingId(item.id); setDraft(item.content); }}>{language === "zh" ? "编辑" : "Edit"}</button><button className="ghost-action danger" disabled={busyId === item.id} onClick={() => remove(item)}>{language === "zh" ? "删除" : "Delete"}</button></>}</div></article>)}</div></div>}</article>;
+          })}
         </div>
       </article>
     </section>
   );
 }
 
+function LearningCalendar({ language, items, selected, onSelect }: { language: Language; items: MeetingItem[]; selected: string; onSelect: (day: string) => void }) {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = today.getMonth();
+  const first = new Date(year, month, 1);
+  const startOffset = (first.getDay() + 6) % 7;
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const counts = new Map<string, number>();
+  for (const item of items) {
+    const date = new Date(item.createdAt);
+    if (date.getFullYear() !== year || date.getMonth() !== month) continue;
+    const key = `${year}-${String(month + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  const cells = Array.from({ length: 42 }, (_, index) => {
+    const day = index - startOffset + 1;
+    return day > 0 && day <= daysInMonth ? day : 0;
+  });
+  const labels = language === "zh" ? ["一", "二", "三", "四", "五", "六", "日"] : ["M", "T", "W", "T", "F", "S", "S"];
+  return <article className="learning-calendar"><div className="calendar-head"><div><span className="eyebrow">LEARNING CALENDAR</span><strong>{new Intl.DateTimeFormat(language === "zh" ? "zh-CN" : "en-US", { year: "numeric", month: "long" }).format(today)}</strong></div><button className={selected ? "active" : ""} onClick={() => onSelect("")}>{language === "zh" ? "显示全部" : "Show all"}</button></div><div className="calendar-week">{labels.map((label, index) => <span key={`${label}-${index}`}>{label}</span>)}</div><div className="calendar-grid">{cells.map((day, index) => {
+    if (!day) return <i key={`empty-${index}`} />;
+    const key = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    const count = counts.get(key) || 0;
+    const isToday = day === today.getDate();
+    return <button key={key} className={`${count ? "has-learning" : ""} ${selected === key ? "selected" : ""} ${isToday ? "today" : ""}`} onClick={() => count && onSelect(selected === key ? "" : key)}><b>{day}</b>{count ? <span>{count}</span> : null}</button>;
+  })}</div><div className="calendar-legend"><span><i />{language === "zh" ? "有学习记录" : "Learning activity"}</span><strong>{counts.size} {language === "zh" ? "个学习日" : "active days"}</strong></div></article>;
+}
+
 function HistoryView({ language, items, savedTotal, onOpen }: { language: Language; items: MeetingItem[]; savedTotal: number; onOpen: (id: string) => void }) {
+  const [selectedDay, setSelectedDay] = useState("");
+  const visibleItems = selectedDay ? items.filter((item) => {
+    const date = new Date(item.createdAt);
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+    return key === selectedDay;
+  }) : items;
   return (
     <section className="page page-view">
       <div className="page-title"><div><span className="eyebrow">VIEWING HISTORY</span><h1>{copy[language].history}</h1><p>{language === "zh" ? "你看过的、跳过的，以及真正留下来的。" : "Everything watched, skipped and retained."}</p></div></div>
+      <LearningCalendar language={language} items={items} selected={selectedDay} onSelect={setSelectedDay} />
       <div className="history-layout">
         <article className="content-panel">
           <div className="section-head border-bottom"><div className="inline-tabs"><button className="active">{language === "zh" ? "全部" : "All"}</button><button>{language === "zh" ? "我看过的" : "Watched"}</button><button>{language === "zh" ? "Peek 跳过的" : "Skipped by Peek"}</button></div><button className="date-button">{language === "zh" ? "最近 30 天" : "Last 30 days"}⌄</button></div>
-          <div className="history-group"><div className="history-date"><strong>{language === "zh" ? "最近" : "Recent"}</strong><span>{items.length} {language === "zh" ? "条记录" : "records"}</span></div>
-            {!items.length && <div className="panel-empty">{copy[language].noItems}</div>}
-            {items.map((item) => {
+          <div className="history-group"><div className="history-date"><strong>{selectedDay || (language === "zh" ? "最近" : "Recent")}</strong><span>{visibleItems.length} {language === "zh" ? "条记录" : "records"}</span></div>
+            {!visibleItems.length && <div className="panel-empty">{selectedDay ? (language === "zh" ? "这一天没有学习记录。" : "No learning activity on this day.") : copy[language].noItems}</div>}
+            {visibleItems.map((item) => {
               const verdict = item.result?.verdict;
               const resultClass = verdict === "skip" || item.state === "skipped" ? "skip" : "keep";
               return (
@@ -1093,9 +1140,17 @@ function SkillsView({ language, knowledge, onOpen }: { language: Language; knowl
       </section>
     );
   }
+  const masteredCount = knowledge.filter((item) => /known|mastered|existing|重复|已掌握/i.test(String(item.status || ""))).length;
+  const newCount = knowledge.length - masteredCount;
+  const masteredPercent = Math.round((masteredCount / knowledge.length) * 100);
+  const treeNodes = knowledge.slice(0, 7);
   return (
     <section className="page page-view">
       <div className="page-title"><div><span className="eyebrow">LEARNING MAP</span><h1>{copy[language].skills}</h1><p>{language === "zh" ? "以下节点全部来自你的真实分析记录，不显示预设技能。" : "Every node below comes from your real analysis history; no preset skills are shown."}</p></div><div className="saved-pill"><span>{language === "zh" ? "真实节点" : "REAL NODES"}</span><strong>{knowledge.length}</strong></div></div>
+      <div className="skill-visual-grid">
+        <article className="skill-chart-card"><div><span className="eyebrow">KNOWLEDGE MIX</span><h2>{language === "zh" ? "知识构成" : "Knowledge mix"}</h2><p>{language === "zh" ? "新增节点与已掌握节点的占比" : "New versus established knowledge"}</p></div><div className="skill-donut" style={{ background: `conic-gradient(var(--sage) 0 ${masteredPercent}%, var(--clay) ${masteredPercent}% 100%)` }}><span><strong>{knowledge.length}</strong><small>{language === "zh" ? "节点" : "nodes"}</small></span></div><div className="skill-chart-legend"><span><i className="known" />{language === "zh" ? "已掌握" : "Known"} <b>{masteredCount}</b></span><span><i className="fresh" />{language === "zh" ? "新增" : "New"} <b>{newCount}</b></span></div></article>
+        <article className="knowledge-tree-card"><div className="section-head"><div><span className="eyebrow">CONCEPT TREE</span><h2>{language === "zh" ? "知识关系树" : "Knowledge tree"}</h2><p>{language === "zh" ? "从学习画像延伸到最近形成的知识节点" : "Recent knowledge branching from your learning profile"}</p></div></div><div className="knowledge-tree"><div className="tree-root"><PeekMark compact /><strong>{language === "zh" ? "我的学习画像" : "My profile"}</strong></div><div className="tree-branches">{treeNodes.map((item, index) => <div className={`tree-node tone-${index % 3}`} key={String(item.id || index)}><i /><span>{String(item.topic)}</span><small>{/known|mastered|existing|重复|已掌握/i.test(String(item.status || "")) ? (language === "zh" ? "已掌握" : "Known") : (language === "zh" ? "新增长" : "New")}</small></div>)}</div></div></article>
+      </div>
       <div className="skill-layout">
         <article className="skill-map-panel"><div className="section-head"><div><h2>{language === "zh" ? "从内容中形成的技能节点" : "Skill nodes from your content"}</h2><p>{language === "zh" ? "状态与证据直接取自分析结果" : "Statuses and evidence come directly from analysis results"}</p></div><div className="map-legend"><span><i className="done" />{language === "zh" ? "已掌握" : "Known"}</span><span><i className="doing" />{language === "zh" ? "新增知识" : "New"}</span></div></div>
           <div className="dynamic-skill-grid">
@@ -1221,17 +1276,76 @@ function SettingsView({
 function ProgressView({ language, analysis, onBack, onRetry }: { language: Language; analysis: Analysis; onBack: () => void; onRetry: () => void }) {
   const stopped = ["failed", "cancelled"].includes(analysis.status);
   const contentLabel = contentTypeLabel(analysis.contentType, language);
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (stopped || analysis.result) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [stopped, analysis.result]);
+  const parsedStart = new Date(analysis.createdAt || "").getTime();
+  const elapsed = Number.isFinite(parsedStart) ? Math.max(0, Math.floor((now - parsedStart) / 1000)) : 0;
+  const stageText = `${analysis.status} ${analysis.progressText}`.toLowerCase();
+  const progress = stopped ? 100 : /completed|完成/.test(stageText) ? 100 : /repair|修复|整理/.test(stageText) ? 88 : /逐段|结论|分析/.test(stageText) ? 62 : /taskid|恢复|created|运行/.test(stageText) ? 42 : /连接|创建/.test(stageText) ? 24 : 10;
+  const etaSeconds = Math.max(20, Math.round((100 - progress) * 4.2));
+  const steps = language === "zh" ? ["读取来源", "内容分析", "结构化结论", "生成笔记"] : ["Read source", "Analyze", "Structure", "Create notes"];
   return (
-    <section className="page centered-page"><article className="progress-card"><div className={`agent-orb ${stopped ? "stopped" : ""}`}><img src="/mascot-v2.png" alt="" />{!stopped && <i />}</div><span className="eyebrow">REAL AGENT TASK</span><h1>{stopped ? (language === "zh" ? "这次没有完成" : "This task did not finish") : (language === "zh" ? "Peek 正在替你先读" : "Peek is reviewing it")}</h1><p>{analysis.progressText}</p><div className="task-facts"><div><span>{contentLabel}</span><strong>{analysis.title}</strong></div><div><span>{language === "zh" ? "任务状态" : "Status"}</span><strong>{analysis.status}</strong></div><div><span>taskId</span><code>{analysis.taskId || (language === "zh" ? "等待 InfiniSynapse 返回…" : "Waiting for InfiniSynapse…")}</code></div></div>{analysis.errorMessage && <div className="error-box">{analysis.errorMessage}</div>}<div className="button-row">{analysis.id && stopped && <button className="primary-button" onClick={onRetry}>{language === "zh" ? "尝试恢复" : "Recover"}</button>}<button className="secondary-button" onClick={onBack}>{language === "zh" ? "返回" : "Back"}</button></div><small>{language === "zh" ? "刷新不会丢失 taskId；任务可从历史记录继续恢复。" : "Refresh-safe: the task can be recovered from History."}</small></article></section>
+    <section className="page centered-page"><article className="progress-card enhanced-progress"><div className={`agent-orb ${stopped ? "stopped" : ""}`}><img src="/mascot-v2.png" alt="" />{!stopped && <i />}</div><span className="eyebrow">REAL AGENT TASK</span><h1>{stopped ? (language === "zh" ? "这次没有完成" : "This task did not finish") : (language === "zh" ? "Peek 正在替你先读" : "Peek is reviewing it")}</h1><p>{analysis.progressText}</p><div className="analysis-progress-head"><strong>{stopped ? (language === "zh" ? "任务已停止" : "Task stopped") : `${progress}%`}</strong><span>{language === "zh" ? `已用 ${formatTime(elapsed)} · 预计还需约 ${formatTime(etaSeconds)}` : `${formatTime(elapsed)} elapsed · about ${formatTime(etaSeconds)} left`}</span></div><div className="analysis-progress-bar"><i style={{ width: `${progress}%` }} /></div><div className="progress-steps">{steps.map((step, index) => <div className={progress >= (index + 1) * 23 ? "done" : progress >= index * 23 ? "active" : ""} key={step}><i>{progress >= (index + 1) * 23 ? "✓" : index + 1}</i><span>{step}</span></div>)}</div><div className="task-facts"><div><span>{contentLabel}</span><strong>{analysis.title}</strong></div><div><span>{language === "zh" ? "当前阶段" : "Current stage"}</span><strong>{analysis.status}</strong></div><div><span>taskId</span><code>{analysis.taskId || (language === "zh" ? "等待 InfiniSynapse 返回…" : "Waiting for InfiniSynapse…")}</code></div></div><div className="progress-help"><strong>{language === "zh" ? "你现在可以离开这个页面" : "You can leave this page"}</strong><p>{language === "zh" ? "任务会在后台继续；刷新、切换页面或稍后回来都不会丢失进度。" : "The task continues in the background and survives refresh or navigation."}</p></div>{analysis.errorMessage && <div className="error-box">{analysis.errorMessage}</div>}<div className="button-row">{analysis.id && stopped && <button className="primary-button" onClick={onRetry}>{language === "zh" ? "尝试恢复" : "Recover"}</button>}<button className="secondary-button" onClick={onBack}>{language === "zh" ? "返回" : "Back"}</button></div></article></section>
   );
 }
 
 function DetailView({ language, analysis, onBack, onState, onNoteSaved }: { language: Language; analysis: Analysis; onBack: () => void; onState: (state: string) => Promise<void>; onNoteSaved: () => void }) {
-  const result = analysis.result!;
+  const [reportLanguage, setReportLanguage] = useState<Language>("zh");
+  const [translatedResult, setTranslatedResult] = useState<XianjianAnalysisResult | null>(null);
+  const [translationBusy, setTranslationBusy] = useState(false);
+  const [translationError, setTranslationError] = useState("");
   const [noteFor, setNoteFor] = useState<string | null>(null);
   const [noteText, setNoteText] = useState("");
   const [shelfBusy, setShelfBusy] = useState(false);
   const [playError, setPlayError] = useState("");
+  const [question, setQuestion] = useState("");
+  const [answer, setAnswer] = useState<{ answer: string; note: string } | null>(null);
+  const [askBusy, setAskBusy] = useState(false);
+  const [askError, setAskError] = useState("");
+  const result = translatedResult || analysis.result!;
+  useEffect(() => {
+    setReportLanguage("zh");
+    setTranslatedResult(null);
+    setTranslationError("");
+    setAnswer(null);
+    setQuestion("");
+  }, [analysis.id]);
+  const translateReport = async (target: Language) => {
+    if (target === "zh") {
+      setTranslatedResult(null);
+      setReportLanguage("zh");
+      return;
+    }
+    setTranslationBusy(true);
+    setTranslationError("");
+    try {
+      const payload = await api<{ result: XianjianAnalysisResult }>(`/api/analyses/${analysis.id}/translate`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ language: target }) });
+      setTranslatedResult(payload.result);
+      setReportLanguage(target);
+    } catch (caught) {
+      setTranslationError(caught instanceof Error ? caught.message : (language === "zh" ? "报告翻译失败" : "Could not translate the report."));
+    } finally {
+      setTranslationBusy(false);
+    }
+  };
+  const askPeek = async () => {
+    if (!question.trim()) return;
+    setAskBusy(true);
+    setAskError("");
+    setAnswer(null);
+    try {
+      const payload = await api<{ answer: string; note: string }>(`/api/analyses/${analysis.id}/ask`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ question, language }) });
+      setAnswer(payload);
+    } catch (caught) {
+      setAskError(caught instanceof Error ? caught.message : (language === "zh" ? "暂时无法回答" : "Could not answer right now."));
+    } finally {
+      setAskBusy(false);
+    }
+  };
   const highlights = result.segments.filter((segment) => segment.decision === "watch").slice(0, 4);
   const valueScore = contentValueScore(result);
   const matchReason = result.signals.matchReason || (result.signals.match >= 45
@@ -1262,6 +1376,7 @@ function DetailView({ language, analysis, onBack, onState, onNoteSaved }: { lang
   return (
     <section className="page page-view">
       <div className="detail-top"><button className="back-button" onClick={onBack}>← {language === "zh" ? "返回" : "Back"}</button><div className="detail-actions">{shelved ? <><button className="secondary-button shelf-confirmed" disabled>✓ {language === "zh" ? "已在书架" : "On shelf"}</button><button className="icon-button" disabled={shelfBusy} onClick={() => changeShelf("archived")} aria-label={language === "zh" ? "移出书架" : "Remove from shelf"} title={language === "zh" ? "移出书架并同步技能树" : "Remove from shelf and sync skill tree"}>−</button></> : <><button className="primary-button" disabled={shelfBusy} onClick={() => changeShelf("shelved")}>＋ {language === "zh" ? "纳入书架" : "Add to shelf"}</button><button className="secondary-button" disabled={shelfBusy} onClick={() => changeShelf("archived")}>{language === "zh" ? "暂不纳入" : "Not now"}</button></>}</div></div>
+      <div className="report-language-bar"><div><span>文A</span><p><strong>{language === "zh" ? "分析报告语言" : "Report language"}</strong><small>{language === "zh" ? "界面切换不会自动消耗额度；需要时再翻译，结果会缓存。" : "UI switching does not auto-translate. Translate only when needed; results are cached."}</small></p></div><div className="report-language-actions"><button className={reportLanguage === "zh" ? "active" : ""} disabled={translationBusy} onClick={() => translateReport("zh")}>中文</button><button className={reportLanguage === "en" ? "active" : ""} disabled={translationBusy} onClick={() => translateReport("en")}>{translationBusy ? (language === "zh" ? "转换中…" : "Translating…") : "English"}</button></div>{translationError && <span className="report-language-error">{translationError}</span>}</div>
       <div className="detail-hero"><div className="detail-cover"><div className="cover-grid" /><span>{analysis.source.split(/[·｜|]/)[0].toUpperCase()}</span><small>PUBLIC {contentLabel.toUpperCase()} · ANALYZED</small>{isVideo ? <i>{timecode(result.totalDurationSeconds)}</i> : <i>{result.segments.length} 节</i>}</div><div className="detail-copy"><span className="meta">{analysis.source}</span><h1>{analysis.title}</h1><p>{result.summary}</p><div className="speaker-row"><span className="speaker-avatar">P</span><div><strong>Peek · InfiniSynapse Agent</strong><small>{language === "zh" ? (isVideo ? "已核验时间码与内容信号" : "已核验原文章节与内容信号") : (isVideo ? "Timestamps and signals verified" : "Sections and content signals verified")}</small></div></div></div><div className="verdict-card"><span className="verdict-label"><i />{language === "zh" ? "Peek 的结论" : "Peek's verdict"}</span><strong>{verdictLabel(result.verdict, language)}</strong><p>{language === "zh" ? (isVideo ? `只看 ${result.segments.filter((segment) => segment.decision === "watch").length} 个片段，共 ${formatTime(result.recommendedSeconds)}。` : `建议优先阅读 ${result.segments.filter((segment) => segment.decision === "watch").length} 个章节。`) : `${result.segments.filter((segment) => segment.decision === "watch").length} recommended sections.`}</p><div><span>{language === "zh" ? "与你的匹配度" : "Match"}</span><b>{result.signals.match}%</b></div></div></div>
       <div className="detail-body">
         <article className="route-panel"><div className="section-head"><div><span className="eyebrow">{isVideo ? "YOUR WATCHING ROUTE" : "YOUR READING ROUTE"}</span><h2>{language === "zh" ? (isVideo ? "你的观看路线" : "你的阅读路线") : (isVideo ? "Your watching route" : "Your reading route")}</h2><p>{language === "zh" ? (isVideo ? `完整视频 ${formatTime(result.totalDurationSeconds)}，只保留能推动当前项目的部分。` : "按原文章节定位，先读最能推动当前项目的部分。") : (isVideo ? `From ${formatTime(result.totalDurationSeconds)}, only keep what moves your project forward.` : "Jump directly to the sections that move your current project forward.")}</p></div>{isVideo && <div className="time-saved"><span>{language === "zh" ? "预计节省" : "TIME SAVED"}</span><strong>{formatTime(result.savedSeconds)}</strong></div>}</div>
@@ -1286,6 +1401,7 @@ function DetailView({ language, analysis, onBack, onState, onNoteSaved }: { lang
           ))}</div>
         </article>
         <aside className="detail-aside">
+          <article className="qa-card"><div className="aside-heading"><div><span className="eyebrow">ASK PEEK</span><h3>{language === "zh" ? "针对这篇内容提问" : "Ask about this content"}</h3></div><b>?</b></div><p>{language === "zh" ? "回答只依据当前分析报告；证据不足时会明确说明。" : "Answers are grounded in this report and flag missing evidence."}</p><textarea value={question} onChange={(event) => setQuestion(event.target.value)} maxLength={800} placeholder={language === "zh" ? "例如：视频提到的三个要素具体是什么？" : "e.g. What exactly are the three elements mentioned?"} /><button className="primary-button" disabled={askBusy || question.trim().length < 2} onClick={askPeek}>{askBusy ? (language === "zh" ? "Peek 正在查找依据…" : "Peek is checking evidence…") : (language === "zh" ? "向 Peek 提问" : "Ask Peek")}</button>{askError && <div className="qa-error">{askError}</div>}{answer && <div className="qa-answer"><strong>{language === "zh" ? "回答" : "Answer"}</strong><p>{answer.answer}</p><button onClick={async () => { await api("/api/notes", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ meetingId: analysis.meetingId, segmentId: `qa:${Date.now()}`, content: `Q：${question}\n\n${answer.note}` }) }); onNoteSaved(); }}>{language === "zh" ? "＋ 加入这篇内容的笔记" : "+ Add to this content's notes"}</button></div>}</article>
           <article className="why-card highlight-card"><div className="aside-heading"><div><span className="eyebrow">HIGHLIGHTS</span><h3>{language === "zh" ? "精华内容" : "Highlights"}</h3></div><b>{highlights.length}</b></div><ul>{highlights.map((item) => <li key={item.id}><i /><span><strong>{item.title}</strong><small>{item.value}</small></span></li>)}</ul></article>
           <article className="score-card"><div className="score-block match-score"><div><span>{language === "zh" ? "与你的匹配度" : "Personal match"}</span><em>{scoreBand(result.signals.match, language)}</em></div><strong>{result.signals.match}<small>%</small></strong><p>{matchReason}</p><i><b style={{ width: `${result.signals.match}%` }} /></i></div><div className="score-block value-score"><div><span>{language === "zh" ? "内容含金量" : "Content value"}</span><em>{scoreBand(valueScore, language)}</em></div><strong>{valueScore}<small>%</small></strong><p>{valueReason}</p><i><b style={{ width: `${valueScore}%` }} /></i></div><div className="score-details">{[[language === "zh" ? "专业深度" : "Depth", result.signals.depth], [language === "zh" ? "来源可信" : "Reliability", result.signals.sourceReliability], [language === "zh" ? "推广占比" : "Promotion", result.signals.promotion]].map(([label, value]) => <div key={String(label)}><span>{label}</span><b>{value}%</b></div>)}</div></article>
           <article className={`shelf-decision-card ${shelved ? "is-shelved" : ""}`}><div className="memory-title"><img src="/mascot-v2.png" alt="" /><div><strong>{shelved ? (language === "zh" ? "已同步到技能树" : "Skill tree updated") : (language === "zh" ? "是否值得进入你的知识体系？" : "Add this to your knowledge system?")}</strong><p>{shelved ? (language === "zh" ? "移出书架时会同步撤回" : "Removing it also reverts the update") : (language === "zh" ? "由你确认，不会自动替你做决定" : "You decide; nothing is added automatically")}</p></div></div><span>{result.newKnowledge.map((item) => item.topic).join(" / ") || (language === "zh" ? "暂无新增技能节点" : "No new skill nodes")}</span>{!shelved && <button className="primary-button" disabled={shelfBusy} onClick={() => changeShelf("shelved")}>{language === "zh" ? "纳入书架并更新技能树" : "Add to shelf and update skill tree"}</button>}</article>

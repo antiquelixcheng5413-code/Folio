@@ -608,6 +608,122 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .signed-in-account small { color: var(--muted); font-size: 9px; overflow: hidden; text-overflow: ellipsis; }
 .auth-not-configured { margin: 0 29px 18px; padding: 11px 13px; border-radius: 10px; background: #fff5e8; color: #8a5a18; font-size: 9px; line-height: 1.55; }
 .account-manage-button { margin-top: 16px; }
+.profile-identity-button > img { width: 30px; height: 30px; flex: 0 0 30px; border-radius: 50%; object-fit: cover; }
+.font-size-control { height: 34px; display: flex; align-items: center; padding: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); }
+.font-size-control button { min-width: 26px; height: 26px; padding: 0 4px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font-size: 8px; cursor: pointer; }
+.font-size-control button:nth-child(1) span { font-size: 7px; }
+.font-size-control button:nth-child(2) span { font-size: 9px; }
+.font-size-control button:nth-child(3) span { font-size: 11px; }
+.font-size-control button.active { background: var(--navy); color: white; }
+html[data-font-size="small"] body { zoom: .92; }
+html[data-font-size="large"] body { zoom: 1.12; }
+html[data-font-size="small"] .app-shell { min-height: calc(100vh / .92); }
+html[data-font-size="large"] .app-shell { min-height: calc(100vh / 1.12); }
+
+.learning-calendar { margin-bottom: 20px; padding: 20px 22px; border: 1px solid var(--line); border-radius: 16px; background: var(--paper); }
+.calendar-head { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 16px; }
+.calendar-head > div { display: grid; gap: 5px; }
+.calendar-head strong { font: 500 18px Georgia, "Songti SC", serif; }
+.calendar-head button { padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--muted); font-size: 8px; cursor: pointer; }
+.calendar-head button.active { color: var(--navy-2); background: var(--sage-pale); }
+.calendar-week, .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 7px; }
+.calendar-week { margin-bottom: 7px; }
+.calendar-week span { color: var(--muted); font-size: 7px; font-weight: 800; text-align: center; }
+.calendar-grid > i, .calendar-grid > button { min-height: 43px; border: 0; border-radius: 10px; }
+.calendar-grid > button { position: relative; display: grid; place-items: center; background: var(--paper-2); color: var(--muted); cursor: default; }
+.calendar-grid > button b { font-size: 9px; }
+.calendar-grid > button span { position: absolute; right: 5px; bottom: 4px; min-width: 14px; height: 14px; display: grid; place-items: center; border-radius: 7px; background: var(--sage); color: white; font-size: 6px; }
+.calendar-grid > button.has-learning { background: #e8eee3; color: var(--navy); cursor: pointer; box-shadow: inset 0 0 0 1px #ccd7c5; }
+.calendar-grid > button.today { box-shadow: inset 0 0 0 1px var(--clay); }
+.calendar-grid > button.selected { color: white; background: var(--navy); box-shadow: none; }
+.calendar-grid > button.selected span { background: var(--clay); }
+.calendar-legend { margin-top: 12px; display: flex; justify-content: space-between; color: var(--muted); font-size: 8px; }
+.calendar-legend span { display: flex; align-items: center; gap: 6px; }
+.calendar-legend i { width: 9px; height: 9px; border-radius: 3px; background: #e8eee3; border: 1px solid #ccd7c5; }
+
+.skill-visual-grid { margin-bottom: 20px; display: grid; grid-template-columns: minmax(240px, .72fr) minmax(0, 1.28fr); gap: 16px; }
+.skill-chart-card, .knowledge-tree-card { padding: 20px; border: 1px solid var(--line); border-radius: 16px; background: var(--paper); }
+.skill-chart-card h2, .knowledge-tree-card h2 { margin: 5px 0 4px; font: 500 20px Georgia, "Songti SC", serif; }
+.skill-chart-card p, .knowledge-tree-card p { margin: 0; color: var(--muted); font-size: 8px; }
+.skill-donut { width: 130px; height: 130px; margin: 17px auto; display: grid; place-items: center; border-radius: 50%; }
+.skill-donut::before { content: ""; grid-area: 1/1; width: 82px; height: 82px; border-radius: 50%; background: var(--paper); }
+.skill-donut > span { z-index: 1; grid-area: 1/1; display: grid; text-align: center; }
+.skill-donut strong { font: 500 27px Georgia, serif; }
+.skill-donut small { color: var(--muted); font-size: 7px; }
+.skill-chart-legend { display: flex; justify-content: center; gap: 14px; }
+.skill-chart-legend span { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 8px; }
+.skill-chart-legend i { width: 8px; height: 8px; border-radius: 50%; }
+.skill-chart-legend i.known { background: var(--sage); }
+.skill-chart-legend i.fresh { background: var(--clay); }
+.knowledge-tree { margin-top: 10px; overflow: hidden; }
+.tree-root { width: max-content; margin: 0 auto 24px; padding: 9px 12px; display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 11px; background: var(--navy); color: white; font-size: 9px; }
+.tree-root .peek-mark { width: 19px; height: 14px; }
+.tree-branches { position: relative; display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.tree-branches::before { content: ""; position: absolute; top: -15px; left: 12.5%; right: 12.5%; height: 1px; background: var(--line); }
+.tree-node { position: relative; min-height: 65px; padding: 11px 8px; display: grid; align-content: center; gap: 4px; border-radius: 10px; background: var(--paper-2); text-align: center; }
+.tree-node::before { content: ""; position: absolute; top: -15px; left: 50%; height: 15px; width: 1px; background: var(--line); }
+.tree-node > i { width: 7px; height: 7px; margin: 0 auto; border-radius: 50%; background: var(--sage); }
+.tree-node.tone-1 > i { background: var(--clay); }
+.tree-node.tone-2 > i { background: var(--navy-2); }
+.tree-node span { overflow: hidden; font-size: 8px; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
+.tree-node small { color: var(--muted); font-size: 6px; }
+
+.notebook-groups { display: grid; gap: 12px; padding-top: 16px; }
+.notebook-toolbar { display: flex; gap: 7px; }
+.notebook-document { overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: var(--paper); }
+.notebook-document.open { box-shadow: 0 10px 28px rgba(39, 48, 44, .08); }
+.notebook-cover { width: 100%; padding: 15px 17px; display: grid; grid-template-columns: 38px 1fr 24px; gap: 12px; align-items: center; border: 0; background: var(--paper); text-align: left; cursor: pointer; }
+.notebook-icon { width: 38px; height: 45px; display: grid; place-items: center; border-radius: 5px 10px 10px 5px; background: var(--navy); color: white; font-size: 15px; box-shadow: inset 4px 0 rgba(255,255,255,.12); }
+.notebook-cover > div { min-width: 0; }
+.notebook-cover strong { display: block; overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.notebook-cover small { display: block; margin-top: 4px; color: var(--muted); font-size: 7px; }
+.notebook-cover p { margin: 6px 0 0; overflow: hidden; color: var(--muted); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.notebook-cover > i { color: var(--muted); font-size: 15px; font-style: normal; }
+.notebook-pages { display: grid; grid-template-columns: 92px 1fr; border-top: 1px solid var(--line); background: #fbfaf6; }
+.notebook-margin { padding: 18px 12px; display: flex; flex-direction: column; gap: 7px; border-right: 1px solid var(--line); }
+.notebook-margin > span { margin-bottom: 5px; color: var(--muted); font-size: 6px; font-weight: 800; letter-spacing: .1em; }
+.notebook-margin button { padding: 6px; border: 0; border-radius: 7px; background: var(--sage-pale); color: var(--navy-2); font: 7px ui-monospace, monospace; cursor: pointer; }
+.note-list.grouped { padding: 16px; }
+.note-list.grouped .note-entry { grid-template-columns: 42px 1fr auto; }
+.summary-note { background: white; }
+.summary-note .note-body p { font-family: Georgia, "Songti SC", serif; }
+
+.analysis-progress-head { max-width: 620px; margin: 24px auto 7px; display: flex; justify-content: space-between; align-items: center; }
+.analysis-progress-head strong { color: var(--navy); font-size: 11px; }
+.analysis-progress-head span { color: var(--muted); font-size: 8px; }
+.analysis-progress-bar { max-width: 620px; height: 8px; margin: 0 auto; overflow: hidden; border-radius: 5px; background: #e6e7e1; }
+.analysis-progress-bar i { height: 100%; display: block; border-radius: inherit; background: linear-gradient(90deg, var(--sage), var(--clay)); transition: width .5s ease; }
+.progress-steps { max-width: 620px; margin: 15px auto 22px; display: grid; grid-template-columns: repeat(4, 1fr); }
+.progress-steps > div { display: grid; justify-items: center; gap: 6px; color: #a4a69f; font-size: 7px; }
+.progress-steps i { width: 22px; height: 22px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 50%; background: var(--paper); font-style: normal; }
+.progress-steps .active, .progress-steps .done { color: var(--navy-2); font-weight: 800; }
+.progress-steps .active i, .progress-steps .done i { border-color: var(--sage); background: var(--sage-pale); }
+.progress-help { max-width: 620px; margin: 13px auto 19px; padding: 12px 14px; border-radius: 11px; background: var(--sage-pale); text-align: left; }
+.progress-help strong { font-size: 9px; }
+.progress-help p { margin: 4px 0 0; color: var(--muted); font-size: 8px; line-height: 1.55; }
+
+.report-language-bar { margin-bottom: 16px; padding: 11px 14px; display: flex; align-items: center; gap: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); }
+.report-language-bar > div:first-child { min-width: 0; display: flex; align-items: center; gap: 10px; }
+.report-language-bar > div:first-child > span { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 9px; background: var(--sage-pale); color: var(--navy-2); font-size: 8px; font-weight: 800; }
+.report-language-bar p { margin: 0; display: grid; gap: 3px; }
+.report-language-bar strong { font-size: 9px; }
+.report-language-bar small { color: var(--muted); font-size: 7px; }
+.report-language-actions { margin-left: auto; display: flex; padding: 3px; border-radius: 9px; background: var(--paper-2); }
+.report-language-actions button { height: 28px; padding: 0 10px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font-size: 8px; cursor: pointer; }
+.report-language-actions button.active { background: white; color: var(--navy); box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+.report-language-error { color: #8b4e3c; font-size: 7px; }
+.qa-card { padding: 17px; border-radius: 14px; background: var(--navy); color: white; }
+.qa-card h3 { margin: 4px 0 0; font: 500 17px Georgia, "Songti SC", serif; }
+.qa-card .aside-heading > b { background: rgba(255,255,255,.13); color: white; }
+.qa-card > p { margin: 12px 0 9px; color: rgba(255,255,255,.65); font-size: 8px; line-height: 1.55; }
+.qa-card textarea { width: 100%; min-height: 82px; padding: 10px; border: 1px solid rgba(255,255,255,.15); border-radius: 9px; outline: 0; background: rgba(255,255,255,.08); color: white; resize: vertical; font-size: 9px; line-height: 1.55; }
+.qa-card textarea::placeholder { color: rgba(255,255,255,.42); }
+.qa-card > .primary-button { width: 100%; margin-top: 8px; background: var(--clay); }
+.qa-answer { margin-top: 11px; padding: 11px; border-radius: 9px; background: rgba(255,255,255,.1); }
+.qa-answer > strong { font-size: 8px; }
+.qa-answer p { margin: 6px 0 9px; color: rgba(255,255,255,.82); font-size: 8px; line-height: 1.65; white-space: pre-wrap; }
+.qa-answer button { padding: 0; border: 0; background: none; color: #e7c3a8; font-size: 8px; font-weight: 800; cursor: pointer; }
+.qa-error { margin-top: 8px; color: #ffcfbc; font-size: 8px; }
 
 @media (max-width: 1450px) and (min-width: 901px) {
   .home-grid { grid-template-columns: 260px minmax(430px, 1fr) 180px; }
@@ -628,6 +744,7 @@ button:disabled { cursor: not-allowed; opacity: .45; }
   .language b { display: none; }
   .page { padding: 28px 18px 42px; }
   .home-grid, .two-column, .history-layout, .skill-layout, .profile-grid, .detail-body { grid-template-columns: 1fr; }
+  .skill-visual-grid { grid-template-columns: 1fr; }
   .settings-grid { grid-template-columns: 1fr; }
   .account-settings-panel { grid-column: auto; }
   .home-grid { min-height: 0; }
@@ -640,6 +757,7 @@ button:disabled { cursor: not-allowed; opacity: .45; }
   .skill-map { overflow-x: auto; min-width: 760px; }
   .skill-map-panel { overflow-x: auto; }
   .dynamic-skill-grid { grid-template-columns: 1fr; }
+  .notebook-pages { grid-template-columns: 76px 1fr; }
   .discovery-candidate { grid-template-columns: 96px minmax(0, 1fr); }
   .discovery-actions { grid-column: 2; grid-template-columns: auto auto; justify-content: start; }
 }
@@ -656,6 +774,23 @@ button:disabled { cursor: not-allowed; opacity: .45; }
   .topbar .infini-connect b { display: none; }
   .topbar .task-list-trigger b { display: none; }
   .topbar .task-list-trigger { padding: 0 7px; }
+  .top-actions { overflow-x: auto; scrollbar-width: none; }
+  .font-size-control { flex: 0 0 auto; }
+  .learning-calendar { padding: 15px 12px; }
+  .calendar-grid, .calendar-week { gap: 4px; }
+  .calendar-grid > i, .calendar-grid > button { min-height: 34px; }
+  .skill-visual-grid { grid-template-columns: 1fr; }
+  .tree-branches { grid-template-columns: repeat(2, 1fr); }
+  .tree-branches::before { display: none; }
+  .tree-node::before { display: none; }
+  .notebook-pages { grid-template-columns: 1fr; }
+  .notebook-margin { padding: 10px 14px; flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+  .notebook-margin > span { display: none; }
+  .note-list.grouped .note-entry { grid-template-columns: 42px 1fr; }
+  .note-list.grouped .note-actions { grid-column: 2; }
+  .report-language-bar { align-items: stretch; flex-direction: column; }
+  .report-language-actions { width: 100%; margin-left: 0; }
+  .report-language-actions button { flex: 1; }
   .running-task-summary { align-items: flex-start; flex-direction: column; }
   .running-task-list > button { grid-template-columns: 46px minmax(0, 1fr) auto; gap: 10px; }
   .running-task-list code { grid-column: 2; }

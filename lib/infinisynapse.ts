@@ -733,6 +733,64 @@ export async function runInfiniAnalysis(options: RunOptions) {
   }
 }
 
+export async function runInfiniJsonTask(prompt: string) {
+  const { apiKey, baseUrl } = config();
+  const connId = crypto.randomUUID();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort("json task timeout"), 2.5 * 60 * 1000);
+  const collected: string[] = [];
+  try {
+    const streamResponse = await fetch(
+      `${baseUrl}/api/ai/events?connId=${encodeURIComponent(connId)}`,
+      { headers: headers(apiKey, "text/event-stream"), signal: controller.signal }
+    );
+    if (!streamResponse.ok || !streamResponse.body) throw new Error("无法连接翻译与问答 Agent");
+    const reader = streamResponse.body.getReader();
+    const createResponse = await fetch(`${baseUrl}/api/ai/message`, {
+      method: "POST",
+      headers: headers(apiKey),
+      body: JSON.stringify({ type: "newTask", text: prompt, connId, chatSettings: { mode: "act" } }),
+      signal: controller.signal,
+    });
+    const createPayload = await createResponse.json().catch(() => null);
+    if (!createResponse.ok) throw new Error("无法创建翻译与问答任务");
+    let taskId = recursiveTaskId(createPayload) || "";
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let completed = false;
+    while (!completed) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+      const blocks = buffer.split("\n\n");
+      buffer = blocks.pop() || "";
+      for (const block of blocks) {
+        const dataText = block.split("\n").filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trimStart()).join("\n");
+        if (!dataText || dataText === "[DONE]") continue;
+        const payload = parseJsonCandidate(dataText) || dataText;
+        taskId ||= recursiveTaskId(payload) || "";
+        collected.push(...recursiveTexts(payload));
+        const serialized = typeof payload === "string" ? payload : JSON.stringify(payload);
+        if (serialized.includes("completion_result")) completed = true;
+      }
+    }
+    if (taskId) {
+      const messages = await apiJson<unknown>(`/api/ai_task/getUiMessageById?id=${encodeURIComponent(taskId)}`).catch(() => null);
+      collected.push(...recursiveTexts(messages));
+    }
+    for (const candidate of collected.reverse()) {
+      const parsed = parseJsonCandidate(candidate);
+      if (parsed && typeof parsed === "object") return { taskId, result: parsed };
+    }
+    throw new Error("Agent 未返回可读取的结构化结果");
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") throw new Error("翻译或问答超时，请稍后重试");
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export async function cancelInfiniTask(taskId: string) {
   return apiJson<unknown>(
     `/api/ai_task/cancelTask?taskId=${encodeURIComponent(taskId)}`,

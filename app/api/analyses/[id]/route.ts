@@ -26,15 +26,34 @@ type AnalysisRow = {
 };
 
 function automaticNoteContent(result: XianjianAnalysisResult) {
-  const highlights = result.evidence.slice(0, 4).map((item) => `- ${item}`);
+  const highlights = result.evidence.slice(0, 6).map((item) => `- ${item}`);
+  const coreSegments = result.segments
+    .filter((segment) => segment.decision === "watch")
+    .slice(0, 6)
+    .map((segment) => `- ${segment.title}：${segment.value}${segment.evidence ? `（依据：${segment.evidence}）` : ""}`);
+  const newKnowledge = result.newKnowledge.slice(0, 6).map((item) => `- ${item.topic}：${item.evidence}`);
+  const repeated = result.repeatedKnowledge.slice(0, 4).map((item) => `- ${item.topic}：${item.evidence}`);
   return [
+    "# 核心结论",
     result.summary,
     "",
-    "精华内容",
-    ...(highlights.length ? highlights : ["- 这条内容的要点已整理在分析路线中。"]),
+    "## 文章／视频核心总结",
+    ...(highlights.length ? highlights : ["- 暂无可独立提取的核心结论。"]),
     "",
-    `匹配度 ${result.signals.match}%：${result.signals.matchReason}`,
-    `内容含金量 ${result.signals.value}%：${result.signals.valueReason}`,
+    "## 关键概念与具体内容",
+    ...(coreSegments.length ? coreSegments : ["- 本次报告没有标出建议保留的核心片段。"]),
+    "",
+    "## 新增知识",
+    ...(newKnowledge.length ? newKnowledge : ["- 暂无明确新增知识。"]),
+    ...(repeated.length ? ["", "## 已知或重复内容", ...repeated] : []),
+    "",
+    "## 判断依据",
+    `- 匹配度 ${result.signals.match}%：${result.signals.matchReason}`,
+    `- 内容含金量 ${result.signals.value}%：${result.signals.valueReason}`,
+    "",
+    "## 可继续追问",
+    "- 哪个概念最值得深入？它与我已有知识有什么关系？",
+    "- 报告中的结论有哪些前提或证据限制？",
   ].join("\n");
 }
 
