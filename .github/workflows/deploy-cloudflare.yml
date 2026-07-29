@@ -46,9 +46,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build and test
-        run: pnpm test
-
       - name: Find or create production D1 database
         shell: bash
         run: |
@@ -65,6 +62,9 @@ jobs:
         shell: bash
         run: |
           node -e "const fs=require('fs'); const p='wrangler.toml'; let s=fs.readFileSync(p,'utf8'); s=s.replace('REPLACE_WITH_YOUR_D1_DATABASE_ID', process.env.D1_DATABASE_ID); fs.writeFileSync(p,s);"
+
+      - name: Build and test
+        run: pnpm test
 
       - name: Deploy public Worker
         run: pnpm exec wrangler deploy
