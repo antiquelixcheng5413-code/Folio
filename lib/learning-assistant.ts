@@ -63,10 +63,15 @@ export async function answerLearningQuestion(input: {
   sourceText: string;
 }) {
   const prompt = buildLearningQaPrompt(input);
-  const task = await runInfiniJsonTask(
-    prompt,
-    (value) => typeof value.answer === "string" && value.answer.trim().length > 0
-  );
+  let task: Awaited<ReturnType<typeof runInfiniJsonTask>>;
+  try {
+    task = await runInfiniJsonTask(
+      prompt,
+      (value) => typeof value.answer === "string" && value.answer.trim().length > 0
+    );
+  } catch {
+    throw new Error("Peek 暂时没有整理出完整回答，请稍后再试");
+  }
   const result = task.result as Record<string, unknown>;
   const answer = String(result.answer || "").trim();
   const note = String(result.note || answer).trim();

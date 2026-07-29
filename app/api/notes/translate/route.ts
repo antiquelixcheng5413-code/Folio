@@ -136,7 +136,7 @@ ${translationInput.slice(0, 60000)}
   return json({ items: translated, cached: false, taskId: task.taskId }, {}, session.cookie);
   } catch (error) {
     return json(
-      { error: error instanceof Error ? error.message : "英文笔记暂时无法生成，请重试" },
+      { error: "英文笔记暂时没有生成完成，中文笔记已保留，请稍后再试" },
       { status: 502 },
       session.cookie
     );
