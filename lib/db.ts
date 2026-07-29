@@ -103,6 +103,7 @@ export async function ensureSchema() {
         coverage INTEGER NOT NULL DEFAULT 0,
         depth INTEGER NOT NULL DEFAULT 0,
         source_value INTEGER NOT NULL DEFAULT 0,
+        taxonomy_version TEXT NOT NULL DEFAULT '',
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
       )`),
       db.prepare(`CREATE TABLE IF NOT EXISTS discovery_candidates (
@@ -180,6 +181,7 @@ export async function ensureSchema() {
       "ALTER TABLE knowledge_items ADD COLUMN coverage INTEGER NOT NULL DEFAULT 0",
       "ALTER TABLE knowledge_items ADD COLUMN depth INTEGER NOT NULL DEFAULT 0",
       "ALTER TABLE knowledge_items ADD COLUMN source_value INTEGER NOT NULL DEFAULT 0",
+      "ALTER TABLE knowledge_items ADD COLUMN taxonomy_version TEXT NOT NULL DEFAULT ''",
     ]) {
       try {
         await db.prepare(statement).run();

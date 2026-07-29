@@ -105,8 +105,8 @@ export async function PATCH(
             (id, session_id, meeting_id, analysis_id, topic, status, evidence,
               skill_key, domain, skill_type, description, prerequisites_json,
               category,
-              mastery_level, confidence, coverage, depth, source_value)
-            SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+              mastery_level, confidence, coverage, depth, source_value, taxonomy_version)
+            SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'peek.taxonomy.v2'
             WHERE NOT EXISTS (
               SELECT 1 FROM knowledge_items
               WHERE session_id = ? AND analysis_id = ? AND skill_key = ?

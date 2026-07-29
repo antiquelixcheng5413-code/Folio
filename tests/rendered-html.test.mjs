@@ -97,6 +97,7 @@ assert.match(client, /titleMode/);
   assert.match(client, /类别 → 专业领域 → 知识与技能点/);
   assert.match(taxonomy, /豪斯多夫维数/);
   assert.match(taxonomy, /extractLegacySkillPoints/);
+  assert.match(meetingState, /peek\.taxonomy\.v2/);
   assert.match(personalization, /0\.15 \+ 0\.85/);
   assert.match(analysisRoute, /k\.meeting_id !=/);
   assert.match(meetingState, /mastery_level/);

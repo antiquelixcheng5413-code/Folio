@@ -89,6 +89,7 @@ export const knowledgeItems = sqliteTable("knowledge_items", {
   coverage: integer("coverage").notNull().default(0),
   depth: integer("depth").notNull().default(0),
   sourceValue: integer("source_value").notNull().default(0),
+  taxonomyVersion: text("taxonomy_version").notNull().default(""),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 

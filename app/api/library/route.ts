@@ -9,7 +9,7 @@ async function repairLegacyKnowledge(db: D1Database, sessionId: string) {
       FROM knowledge_items k
       JOIN analyses a ON a.id = k.analysis_id
       JOIN meetings m ON m.id = k.meeting_id
-      WHERE k.session_id = ? AND (k.skill_key = '' OR k.category = '' OR k.domain = '')
+      WHERE k.session_id = ? AND k.taxonomy_version != 'peek.taxonomy.v2'
       AND a.result_json IS NOT NULL
       LIMIT 20`)
     .bind(sessionId)
@@ -22,7 +22,7 @@ async function repairLegacyKnowledge(db: D1Database, sessionId: string) {
     const statements = [
       db
         .prepare(`DELETE FROM knowledge_items WHERE session_id = ? AND analysis_id = ?
-          AND (skill_key = '' OR category = '' OR domain = '')`)
+          AND taxonomy_version != 'peek.taxonomy.v2'`)
         .bind(sessionId, row.analysisId),
     ];
     for (const skill of skills) {
@@ -37,8 +37,8 @@ async function repairLegacyKnowledge(db: D1Database, sessionId: string) {
           .prepare(`INSERT INTO knowledge_items
             (id, session_id, meeting_id, analysis_id, topic, status, evidence,
               skill_key, category, domain, skill_type, description, prerequisites_json,
-              mastery_level, confidence, coverage, depth, source_value)
-            VALUES (?, ?, ?, ?, ?, 'exposed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+              mastery_level, confidence, coverage, depth, source_value, taxonomy_version)
+            VALUES (?, ?, ?, ?, ?, 'exposed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'peek.taxonomy.v2')`)
           .bind(
             crypto.randomUUID(),
             sessionId,

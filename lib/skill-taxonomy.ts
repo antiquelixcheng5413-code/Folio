@@ -3,6 +3,9 @@ import { skillKey } from "./personalization";
 
 const GENERIC_NAMES = new Set([
   "数学史",
+  "数学",
+  "几何测度论",
+  "调和分析",
   "背景介绍",
   "证明策略",
   "核心方法",
@@ -19,9 +22,11 @@ export function canonicalSkillName(input: string) {
     .normalize("NFKC")
     .replace(/^[+✓\s]+/, "")
     .replace(/^(理解|掌握|学习|运用|使用|介绍|讲解|关于)\s*/, "")
+    .replace(/^.*中的(?=[\p{Script=Han}A-Za-z-]{2,18}$)/u, "")
     .replace(/^三维(?=挂谷猜想)/, "")
     .trim();
   if (name.includes("挂谷猜想")) name = "挂谷猜想";
+  if (name.includes("粘性挂谷集")) name = "粘性挂谷集";
   const namedDimension = name.match(
     /(豪斯多夫维数|闵可夫斯基维数|Hausdorff\s*维数|Minkowski\s*维数|Assouad\s*维数)$/i
   );
@@ -30,10 +35,10 @@ export function canonicalSkillName(input: string) {
   if (
     !name ||
     name.length < 2 ||
-    name.length > 30 ||
+    name.length > 20 ||
     /[，。；！？]/.test(name) ||
     GENERIC_NAMES.has(name) ||
-    /(已被|获得|发表于|提供了|完成了|证明了|评价为|是谁|为什么)/.test(name)
+    /(已被|获得|发表于|提供了|完成了|证明了|评价为|是谁|为什么|是否|将|任何|包含)/.test(name)
   ) {
     return "";
   }
@@ -83,10 +88,7 @@ function candidateTerms(result: XianjianAnalysisResult) {
     })),
   });
   const patterns = [
-    /[\p{Script=Han}A-Za-z-]{1,12}猜想/gu,
-    /[\p{Script=Han}A-Za-z-]{1,12}维数/gu,
-    /[\p{Script=Han}A-Za-z-]{1,12}(?:定理|算法|方程|变换|回归|分类|优化|归纳)/gu,
-    /(?:Assouad|Hausdorff|Minkowski)\s*维数/giu,
+    /(?:豪斯多夫|闵可夫斯基|Assouad|Hausdorff|Minkowski)\s*维数/giu,
   ];
   for (const pattern of patterns) terms.push(...text.matchAll(pattern).map((match) => match[0]));
   return [...new Set(terms.map(canonicalSkillName).filter(Boolean))];
