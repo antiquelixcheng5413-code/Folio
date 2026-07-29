@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ContentType, LearningProfile, XianjianAnalysisResult } from "../lib/types";
 import { ConnectInfiniModal, type AuthStatus } from "./connect-infini-modal";
 
@@ -89,8 +89,8 @@ function analysisPreview(item: MeetingItem, language: Language): Analysis {
   const progressText = item.progressText || (item.status === "queued"
     ? (language === "zh" ? "等待开始分析" : "Waiting to start")
     : item.status === "repairing"
-      ? (language === "zh" ? "Agent 已完成，正在整理分析结果" : "Agent finished; preparing the result")
-      : (language === "zh" ? "真实任务运行中，可刷新恢复" : "The task is running and survives refresh"));
+      ? (language === "zh" ? "正在整理分析结果" : "Preparing the result")
+      : (language === "zh" ? "正在分析内容" : "Analyzing the content"));
   return {
     id: item.analysisId || "",
     createdAt: item.createdAt,
@@ -129,6 +129,29 @@ function scoreBand(score: number, language: Language) {
   if (score >= 75) return language === "zh" ? "高" : "High";
   if (score >= 45) return language === "zh" ? "中" : "Medium";
   return language === "zh" ? "低" : "Low";
+}
+
+function analysisStageLabel(status: string | undefined, language: Language) {
+  const labels: Record<string, [string, string]> = {
+    queued: ["等待中", "Waiting"],
+    running: ["分析中", "Analyzing"],
+    recovering: ["分析中", "Analyzing"],
+    repairing: ["整理中", "Preparing"],
+    completed: ["已完成", "Complete"],
+    failed: ["未完成", "Failed"],
+    cancelled: ["已取消", "Cancelled"],
+  };
+  const label = labels[status || "queued"] || labels.queued;
+  return language === "zh" ? label[0] : label[1];
+}
+
+function InfoTip({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <span className="info-tip" tabIndex={0} aria-label={label}>
+      <b aria-hidden="true">?</b>
+      <span role="tooltip">{children}</span>
+    </span>
+  );
 }
 
 function playbackUrl(videoUrl: string, seconds: number) {
@@ -543,7 +566,7 @@ export default function PeekApp() {
       const meetingId = meetingPayload.meeting.id;
       setAnalysis((current) =>
         current
-          ? { ...current, meetingId, title: meetingPayload.meeting.title, source: meetingPayload.meeting.source, contentType: meetingPayload.meeting.contentType, contentUrl: meetingPayload.meeting.contentUrl || current.contentUrl, videoUrl: meetingPayload.meeting.videoUrl || current.videoUrl, progressText: "正在连接真实 Agent" }
+          ? { ...current, meetingId, title: meetingPayload.meeting.title, source: meetingPayload.meeting.source, contentType: meetingPayload.meeting.contentType, contentUrl: meetingPayload.meeting.contentUrl || current.contentUrl, videoUrl: meetingPayload.meeting.videoUrl || current.videoUrl, progressText: "正在准备分析" }
           : current
       );
       const response = await fetch(`/api/meetings/${meetingId}/analyze`, { method: "POST" });
@@ -593,7 +616,7 @@ export default function PeekApp() {
             if (recoveryId) replaceAnalysisUrl(recoveryId);
             setAnalysis((current) =>
               current
-                ? { ...current, id: recoveryId, taskId: String(data.taskId), status: "recovering", progressText: "真实任务运行中，可刷新恢复" }
+                ? { ...current, id: recoveryId, taskId: String(data.taskId), status: "recovering", progressText: "正在分析内容" }
                 : current
             );
             void loadMeetings();
@@ -636,7 +659,7 @@ export default function PeekApp() {
   const sidebarAnalysisId = (currentAnalysisIsActive ? analysis?.id : "") || activeMeeting?.analysisId || "";
   const sidebarAnalysisTitle = (currentAnalysisIsActive ? analysis?.title : "") || activeMeeting?.title || "";
   const sidebarProgressText = (currentAnalysisIsActive ? analysis?.progressText : "") ||
-    (language === "zh" ? "真实任务仍在运行，可刷新恢复" : "The task is still running and survives refresh");
+    (language === "zh" ? "正在分析内容" : "The content is being analyzed");
   const sidebarHasActiveAnalysis = currentAnalysisIsActive || Boolean(activeMeeting);
   const currentAnalysisAlreadyListed = Boolean(analysis?.id && activeMeetings.some((item) => item.analysisId === analysis.id));
   const activeTaskCount = activeMeetings.length + (currentAnalysisIsActive && !currentAnalysisAlreadyListed ? 1 : 0);
@@ -735,7 +758,7 @@ export default function PeekApp() {
                   {activeTaskItems.length ? activeTaskItems.map((item) => (
                     <button key={item.analysisId || item.id} onClick={() => { setTaskListOpen(false); if (item.analysisId) void openAnalysis(item.analysisId); }}>
                       <span className="task-kind">{contentTypeLabel(item.contentType || "video", language)}</span>
-                      <span><strong>{item.title}</strong><small>{item.progressText || (language === "zh" ? "真实任务运行中，可刷新恢复" : "Running and recoverable")}</small>{item.taskId && <code>{item.taskId}</code>}</span>
+                      <span><strong>{item.title}</strong><small>{item.progressText || (language === "zh" ? "正在分析内容" : "Analyzing the content")}</small></span>
                       <i>→</i>
                     </button>
                   )) : <p>{language === "zh" ? "当前没有运行中的任务" : "No tasks are running"}</p>}
@@ -912,8 +935,8 @@ function HomeView({
         <aside className="quick-stack">
           <button className="quick-card navy" onClick={() => onNavigate("later")}><span>{copy[language].later}</span><i>↗</i><strong>{laterCount} {language === "zh" ? "场" : ""}</strong><small>{language === "zh" ? "只留下值得投入的内容" : "Only the talks worth your time"}</small></button>
           <button className="quick-card" onClick={() => onNavigate("history")}><span>{copy[language].history}</span><i>↗</i><strong>{meetings.length} {language === "zh" ? "场" : ""}</strong><small>{language === "zh" ? "看过、跳过与留下" : "Watched, skipped and saved"}</small></button>
-          <button className="quick-card" onClick={() => onNavigate("history")}><span>{language === "zh" ? "学习记录" : "Learning record"}</span><i>↗</i><strong>{knowledgeCount} {language === "zh" ? "个" : ""}</strong><small>{language === "zh" ? "自动沉淀知识更新" : "Knowledge updates"}</small></button>
-          <button className="quick-card book-quick" onClick={() => onNavigate("skills")}><span>{copy[language].skills}</span><i>↗</i><strong>{language === "zh" ? "路径模板" : "Path template"}</strong><small>{language === "zh" ? `${knowledgeCount} 项真实知识更新` : `${knowledgeCount} real updates`}</small></button>
+          <button className="quick-card" onClick={() => onNavigate("history")}><span>{language === "zh" ? "学习记录" : "Learning record"}</span><i>↗</i><strong>{knowledgeCount} {language === "zh" ? "个" : ""}</strong><small>{language === "zh" ? "已积累的知识点" : "Knowledge collected"}</small></button>
+          <button className="quick-card book-quick" onClick={() => onNavigate("skills")}><span>{copy[language].skills}</span><i>↗</i><strong>{knowledgeCount} {language === "zh" ? "项" : "items"}</strong><small>{language === "zh" ? "查看知识之间的联系" : "See how ideas connect"}</small></button>
         </aside>
       </div>
     </section>
@@ -923,16 +946,15 @@ function HomeView({
 function RunningTasksView({ language, items, onOpen, onAdd }: { language: Language; items: MeetingItem[]; onOpen: (id: string) => void; onAdd: () => void }) {
   return (
     <section className="page page-view running-tasks-page">
-      <div className="page-title"><div><span className="eyebrow">ACTIVE ANALYSES</span><h1>{language === "zh" ? "运行中任务" : "Running tasks"}</h1><p>{language === "zh" ? "这里集中显示所有正在排队、分析、恢复和整理结果的内容。" : "All queued, running, recovering and repairing analyses appear here."}</p></div><button className="primary-button" onClick={onAdd}>＋ {language === "zh" ? "添加内容" : "Add content"}</button></div>
+      <div className="page-title"><div><span className="eyebrow">IN PROGRESS</span><h1>{language === "zh" ? "正在分析" : "In progress"}</h1><p>{language === "zh" ? "你可以离开这里，完成后会自动出现在历史记录中。" : "You can leave this page. Completed items appear in History."}</p></div><button className="primary-button" onClick={onAdd}>＋ {language === "zh" ? "添加内容" : "Add content"}</button></div>
       <article className="running-task-panel">
-        <div className="running-task-summary"><div><span>{language === "zh" ? "正在运行" : "ACTIVE"}</span><strong>{items.length}</strong></div><p>{language === "zh" ? "任务在后台继续执行，离开此页面或刷新不会中断。" : "Tasks continue in the background when you leave or refresh."}</p></div>
+        <div className="running-task-summary"><div><span>{language === "zh" ? "处理中" : "ACTIVE"}</span><strong>{items.length}</strong></div></div>
         <div className="running-task-list">
           {items.length ? items.map((item) => (
             <button key={item.analysisId || item.id} disabled={!item.analysisId} onClick={() => item.analysisId && onOpen(item.analysisId)}>
               <span className="running-task-kind">{contentTypeLabel(item.contentType || "video", language)}</span>
-              <span className="running-task-copy"><strong>{item.title}</strong><small>{item.progressText || (language === "zh" ? "正在启动真实分析任务" : "Starting the analysis task")}</small></span>
-              <span className={`running-task-status ${item.status || "queued"}`}><i />{item.status || "queued"}</span>
-              <code>{item.taskId || (language === "zh" ? "正在获取 taskId" : "Getting taskId")}</code>
+              <span className="running-task-copy"><strong>{item.title}</strong><small>{item.progressText || (language === "zh" ? "正在准备分析" : "Preparing analysis")}</small></span>
+              <span className={`running-task-status ${item.status || "queued"}`}><i />{analysisStageLabel(item.status, language)}</span>
               <i className="running-task-arrow">→</i>
             </button>
           )) : <div className="running-task-empty"><span>◷</span><h2>{language === "zh" ? "当前没有运行中的任务" : "No tasks are running"}</h2><p>{language === "zh" ? "添加视频、文章或论文后，任务会立即出现在这里。" : "Add a video, article or paper and it will appear here immediately."}</p><button className="primary-button" onClick={onAdd}>{language === "zh" ? "开始分析" : "Start analysis"}</button></div>}
@@ -1046,7 +1068,7 @@ function NotesView({ language, items, onChanged }: { language: Language; items: 
     <section className="page page-view notes-page">
       <div className="page-title"><div><span className="eyebrow">TIMESTAMP NOTEBOOK</span><h1>{copy[language].notes}</h1><p>{language === "zh" ? "所有在分析片段下写过的时间码笔记，都集中保存在这里。" : "Every timestamp note written under an analyzed segment is collected here."}</p></div><div className="saved-pill"><span>{language === "zh" ? "笔记总数" : "TOTAL NOTES"}</span><strong>{items.length}</strong></div></div>
       <article className="content-panel notes-panel notebook-library">
-        <div className="section-head border-bottom"><div><h2>{language === "zh" ? "我的笔记本" : "My notebook"}</h2><p>{language === "zh" ? "同一内容的总结与边栏批注封装在一起" : "Summary and margin notes are grouped by content"}</p></div><div className="notebook-toolbar"><button className="outline-button export-notes" disabled={!openMeetingId || rebuildBusy} onClick={async () => { if (!openMeetingId) return; setRebuildBusy(true); try { await api("/api/notes/rebuild", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ meetingId: openMeetingId }) }); await onChanged(); } finally { setRebuildBusy(false); } }}>{rebuildBusy ? (language === "zh" ? "整理中…" : "Rebuilding…") : (language === "zh" ? "重建核心笔记" : "Rebuild core note")}</button><button className="outline-button export-notes" disabled={!items.length} onClick={exportNotebook}>{language === "zh" ? "导出 Markdown" : "Export Markdown"}</button></div></div>
+        <div className="section-head border-bottom"><div><h2>{language === "zh" ? "我的笔记本" : "My notebook"}</h2><p>{language === "zh" ? "同一内容的总结与边栏批注放在一起" : "Summary and margin notes are grouped by content"}</p></div><div className="notebook-toolbar"><button className="outline-button export-notes" disabled={!openMeetingId || rebuildBusy} onClick={async () => { if (!openMeetingId) return; setRebuildBusy(true); try { await api("/api/notes/rebuild", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ meetingId: openMeetingId }) }); await onChanged(); } finally { setRebuildBusy(false); } }}>{rebuildBusy ? (language === "zh" ? "整理中…" : "Rebuilding…") : (language === "zh" ? "重新整理笔记" : "Reorganize notes")}</button><button className="outline-button export-notes" disabled={!items.length} onClick={exportNotebook}>{language === "zh" ? "导出 Markdown" : "Export Markdown"}</button></div></div>
         {!items.length && <div className="notes-empty"><span>✎</span><h2>{language === "zh" ? "还没有笔记" : "No notes yet"}</h2><p>{language === "zh" ? "先打开一条内容的分析路线，在任意片段下添加笔记。" : "Open an analysis route and add a note under any segment."}</p></div>}
         <div className="notebook-groups">
           {groups.map((group) => {
@@ -1118,7 +1140,7 @@ function HistoryView({ language, items, savedTotal, onOpen }: { language: Langua
             })}
           </div>
         </article>
-        <aside className="history-stats"><article><span>{language === "zh" ? "累计省下" : "Time saved"}</span><strong>{formatTime(savedTotal)}</strong><small>{language === "zh" ? "来自真实分析结果" : "From real analyses"}</small></article><article><span>{language === "zh" ? "真正看完" : "Completed"}</span><strong>{items.filter((item) => item.state === "completed").length} {language === "zh" ? "场" : ""}</strong><small>{language === "zh" ? "聚焦高价值片段" : "Focused viewing"}</small></article><article className="mascot-tip"><img src="/mascot-v2.png" alt="" /><div><strong>{language === "zh" ? "内容偏好" : "Content preference"}</strong><p>{items.length ? (language === "zh" ? "继续分析更多视频后，Peek 才会从真实记录中总结偏好。" : "Peek will summarize preferences after more real analyses.") : (language === "zh" ? "还没有足够数据形成偏好判断。" : "Not enough data to infer a preference yet.")}</p></div></article></aside>
+        <aside className="history-stats"><article><span>{language === "zh" ? "累计省下" : "Time saved"}</span><strong>{formatTime(savedTotal)}</strong><small>{language === "zh" ? "按推荐路线估算" : "Based on recommended routes"}</small></article><article><span>{language === "zh" ? "真正看完" : "Completed"}</span><strong>{items.filter((item) => item.state === "completed").length} {language === "zh" ? "场" : ""}</strong><small>{language === "zh" ? "聚焦高价值片段" : "Focused viewing"}</small></article><article className="mascot-tip"><img src="/mascot-v2.png" alt="" /><div><strong>{language === "zh" ? "内容偏好" : "Content preference"}</strong><p>{items.length ? (language === "zh" ? "再分析一些内容后，Peek 会逐渐总结你的偏好。" : "Peek will summarize your preferences as you analyze more content.") : (language === "zh" ? "还没有足够数据形成偏好判断。" : "Not enough data to infer a preference yet.")}</p></div></article></aside>
       </div>
     </section>
   );
@@ -1130,11 +1152,11 @@ function SkillsView({ language, knowledge, onOpen }: { language: Language; knowl
   if (!knowledge.length) {
     return (
       <section className="page page-view">
-        <div className="page-title"><div><span className="eyebrow">LEARNING MAP</span><h1>{copy[language].skills}</h1><p>{language === "zh" ? "技能树只会使用你的真实分析结果生成。" : "Your skill tree is generated only from real analysis results."}</p></div></div>
+        <div className="page-title"><div><span className="eyebrow">LEARNING MAP</span><h1>{copy[language].skills}</h1><p>{language === "zh" ? "你收进书架的内容，会逐渐形成自己的知识地图。" : "Items on your shelf gradually form your knowledge map."}</p></div></div>
         <article className="true-empty-state skill-empty-state">
           <span className="empty-symbol">◇</span>
           <h2>{language === "zh" ? "技能树还是空的" : "Your skill tree is empty"}</h2>
-          <p>{language === "zh" ? "这里不会预填 Prompt、RAG 或 Agent Memory。完成内容分析并确认纳入书架后，提炼出的知识才会成为技能节点。" : "No Prompt, RAG or Agent Memory placeholders. Analyze content and add it to your shelf to create skill nodes."}</p>
+          <p>{language === "zh" ? "分析一条内容并纳入书架后，相关知识点会出现在这里。" : "Analyze an item and add it to your shelf to begin your map."}</p>
           <button className="primary-button" onClick={onOpen}>{language === "zh" ? "添加第一条内容" : "Add your first item"}</button>
         </article>
       </section>
@@ -1159,12 +1181,12 @@ function SkillsView({ language, knowledge, onOpen }: { language: Language; knowl
             {knowledge.map((item, index) => {
               const mastery = masteryOf(item);
               const mastered = mastery >= 70;
-              const description = String(item.description || item.evidence || (language === "zh" ? "来自真实分析结果" : "From a real analysis result"));
+              const description = String(item.description || item.evidence || (language === "zh" ? "来自这条内容的知识更新" : "A knowledge update from this item"));
               return <article className={`dynamic-skill-node ${mastered ? "mastered" : "new"}`} key={String(item.id || `${item.topic}-${index}`)}><i>{mastered ? "✓" : mastery >= 25 ? "↗" : "+"}</i><div><small className="skill-domain">{String(item.category || (language === "zh" ? "未分类" : "Unclassified"))} ／ {String(item.domain || (language === "zh" ? "未分类" : "Unclassified"))} · {String(item.skillType || "concept")}</small><strong>{String(item.topic || (language === "zh" ? "未命名知识点" : "Untitled knowledge point"))}</strong><p>{description}</p><div className="skill-mastery-bar"><b style={{ width: `${mastery}%` }} /></div><small>{language === "zh" ? `掌握度 ${mastery}% · 覆盖 ${Number(item.coverage || 0)}% · 可信 ${Number(item.confidence || 0)}%` : `Mastery ${mastery}% · coverage ${Number(item.coverage || 0)}% · confidence ${Number(item.confidence || 0)}%`}</small></div><span>{mastered ? (language === "zh" ? "已掌握" : "Mastered") : mastery >= 25 ? (language === "zh" ? "学习中" : "Developing") : (language === "zh" ? "已接触" : "Exposed")}</span></article>;
             })}
           </div>
         </article>
-        <aside className="skill-side"><article className="current-skill dynamic-focus"><span className="eyebrow">LATEST UPDATE</span><strong>{String(focus.topic)}</strong><p>{String(focus.evidence || (language === "zh" ? "来自最近一次真实分析。" : "From your latest real analysis."))}</p><button onClick={onOpen}>{language === "zh" ? "打开对应内容" : "Open related content"}</button></article><article className="skill-gap"><span>{language === "zh" ? "如何继续生长" : "NEXT STEP"}</span><strong>{language === "zh" ? "再分析一个相邻主题" : "Analyze an adjacent topic"}</strong><p>{language === "zh" ? "新内容会追加节点，不会覆盖已经沉淀的知识。" : "New content appends nodes instead of replacing existing knowledge."}</p><button onClick={onOpen}>{language === "zh" ? "添加内容 →" : "Add content →"}</button></article></aside>
+        <aside className="skill-side"><article className="current-skill dynamic-focus"><span className="eyebrow">LATEST UPDATE</span><strong>{String(focus.topic)}</strong><p>{String(focus.evidence || (language === "zh" ? "来自最近加入书架的内容。" : "From your latest shelf item."))}</p><button onClick={onOpen}>{language === "zh" ? "打开对应内容" : "Open related content"}</button></article><article className="skill-gap"><span>{language === "zh" ? "下一步" : "NEXT STEP"}</span><strong>{language === "zh" ? "再分析一个相邻主题" : "Analyze an adjacent topic"}</strong><p>{language === "zh" ? "加入相关内容，可以逐渐看清知识之间的联系。" : "Add related content to reveal connections between ideas."}</p><button onClick={onOpen}>{language === "zh" ? "添加内容 →" : "Add content →"}</button></article></aside>
       </div>
       <div className="skill-cards-head"><div><h2>{language === "zh" ? "最近更新" : "Recent updates"}</h2><p>{language === "zh" ? "来自你看过、跳过和收藏的内容" : "From watched, skipped and saved content"}</p></div><button>{knowledge.length} {language === "zh" ? "项知识更新" : "updates"}</button></div>
       <div className="skill-update-grid">
@@ -1250,7 +1272,7 @@ function SettingsView({
             <span aria-hidden="true" />
           </label>
           <label className="setting-toggle">
-            <div><strong>{language === "zh" ? "发现后自动分析" : "Analyze discoveries automatically"}</strong><p>{language === "zh" ? "开启后会消耗真实分析额度；关闭时只生成候选推荐。" : "Uses real analysis quota when on; otherwise only recommends candidates."}</p></div>
+            <div><strong>{language === "zh" ? "发现后自动分析" : "Analyze discoveries automatically"}</strong><p>{language === "zh" ? "开启后会使用每日分析额度；关闭时只推荐候选内容。" : "Uses your daily allowance when on; otherwise only recommends candidates."}</p></div>
             <input type="checkbox" checked={autoAnalyzeDiscoveries} disabled={discoveryBusy || !autoDiscoverVideos} onChange={async (event) => { setDiscoveryBusy(true); try { await onDiscoverySettingsChange({ autoAnalyzeDiscoveries: event.target.checked }); } catch (caught) { setError(caught instanceof Error ? caught.message : (language === "zh" ? "自动分析设置保存失败" : "Could not save automatic analysis settings.")); } finally { setDiscoveryBusy(false); } }} />
             <span aria-hidden="true" />
           </label>
@@ -1258,11 +1280,11 @@ function SettingsView({
         </article>
 
         <article className="settings-panel">
-          <div className="settings-panel-head"><span className="settings-icon">◎</span><div><h2>{language === "zh" ? "数据说明" : "About your data"}</h2><p>{language === "zh" ? "页面不会把示例伪装成你的真实记录。" : "Examples are never presented as your real activity."}</p></div></div>
+          <div className="settings-panel-head"><span className="settings-icon">◎</span><div><h2>{language === "zh" ? "学习记录" : "Learning records"}</h2><p>{language === "zh" ? "你决定留下什么，Peek 据此逐渐理解你的方向。" : "Peek learns your direction from what you choose to keep."}</p></div></div>
           <div className="data-truth-list">
-            <div><i className="truth-dot live" /><div><strong>{language === "zh" ? "真实并持久化" : "Real and persisted"}</strong><p>{language === "zh" ? "会议、分析结果、taskId、时间码路线、稍后看状态、笔记、节省时间与知识更新，均来自你当前匿名会话并保存到 D1。" : "Talks, results, taskIds, routes, watch-later state, notes, saved time and knowledge updates come from this anonymous session and are stored in D1."}</p></div></div>
+            <div><i className="truth-dot live" /><div><strong>{language === "zh" ? "自动保存" : "Saved automatically"}</strong><p>{language === "zh" ? "分析结果、书架状态、笔记和知识更新都会保留在你的学习空间中。" : "Results, shelf choices, notes and knowledge updates stay in your learning space."}</p></div></div>
             <div><i className="truth-dot template" /><div><strong>{language === "zh" ? "画像自动成长" : "Profile grows automatically"}</strong><p>{language === "zh" ? "新空间不预填学习画像。只有你确认纳入书架的内容，才会成为画像和技能树的累积依据。" : "New workspaces do not prefill a learning profile. Only content you add to the shelf shapes your profile and skill tree."}</p></div></div>
-            <div><i className="truth-dot empty" /><div><strong>{language === "zh" ? "空状态就是空状态" : "Empty means empty"}</strong><p>{language === "zh" ? "没有真实任务时，首页、历史记录、稍后看和侧栏不会显示虚构会议。" : "Without a real task, Home, History, Watch later and the sidebar show no fictional talks."}</p></div></div>
+            <div><i className="truth-dot empty" /><div><strong>{language === "zh" ? "由你控制" : "You stay in control"}</strong><p>{language === "zh" ? "未纳入书架的内容不会改变你的个人画像或技能树。" : "Items outside your shelf do not change your profile or skill tree."}</p></div></div>
           </div>
         </article>
 
@@ -1270,7 +1292,7 @@ function SettingsView({
 
       <article className="settings-panel settings-footnote">
         <div><span className="eyebrow">PRIVACY</span><h2>{language === "zh" ? "访客可用，登录可选" : "Guest-ready, optional sign-in"}</h2></div>
-        <p>{language === "zh" ? "访客空间通过 HttpOnly 会话 Cookie 隔离；登录密码只在 InfiniSynapse 官方页面输入。先鉴 Peek 不保存原媒体或原文副本，只保留结构化结果和你主动写下的笔记。" : "Guest spaces are isolated by an HttpOnly session cookie, and credentials are entered only on the official InfiniSynapse page. Peek stores structured results and your notes, not source media copies."}</p>
+        <p>{language === "zh" ? "不登录也可以完整使用。Peek 不保存视频或原文副本，只保留分析结果和你主动写下的笔记。" : "Everything works without sign-in. Peek stores results and your notes, not copies of source videos or text."}</p>
       </article>
     </section>
   );
@@ -1290,9 +1312,9 @@ function ProgressView({ language, analysis, onBack, onRetry }: { language: Langu
   const stageText = `${analysis.status} ${analysis.progressText}`.toLowerCase();
   const progress = stopped ? 100 : /completed|完成/.test(stageText) ? 100 : /repair|修复|整理/.test(stageText) ? 88 : /逐段|结论|分析/.test(stageText) ? 62 : /taskid|恢复|created|运行/.test(stageText) ? 42 : /连接|创建/.test(stageText) ? 24 : 10;
   const etaSeconds = Math.max(20, Math.round((100 - progress) * 4.2));
-  const steps = language === "zh" ? ["读取来源", "内容分析", "结构化结论", "生成笔记"] : ["Read source", "Analyze", "Structure", "Create notes"];
+  const steps = language === "zh" ? ["读取内容", "判断价值", "提炼重点", "整理笔记"] : ["Read", "Evaluate", "Find highlights", "Create notes"];
   return (
-    <section className="page centered-page"><article className="progress-card enhanced-progress"><div className={`agent-orb ${stopped ? "stopped" : ""}`}><img src="/mascot-v2.png" alt="" />{!stopped && <i />}</div><span className="eyebrow">REAL AGENT TASK</span><h1>{stopped ? (language === "zh" ? "这次没有完成" : "This task did not finish") : (language === "zh" ? "Peek 正在替你先读" : "Peek is reviewing it")}</h1><p>{analysis.progressText}</p><div className="analysis-progress-head"><strong>{stopped ? (language === "zh" ? "任务已停止" : "Task stopped") : `${progress}%`}</strong><span>{language === "zh" ? `已用 ${formatTime(elapsed)} · 预计还需约 ${formatTime(etaSeconds)}` : `${formatTime(elapsed)} elapsed · about ${formatTime(etaSeconds)} left`}</span></div><div className="analysis-progress-bar"><i style={{ width: `${progress}%` }} /></div><div className="progress-steps">{steps.map((step, index) => <div className={progress >= (index + 1) * 23 ? "done" : progress >= index * 23 ? "active" : ""} key={step}><i>{progress >= (index + 1) * 23 ? "✓" : index + 1}</i><span>{step}</span></div>)}</div><div className="task-facts"><div><span>{contentLabel}</span><strong>{analysis.title}</strong></div><div><span>{language === "zh" ? "当前阶段" : "Current stage"}</span><strong>{analysis.status}</strong></div><div><span>taskId</span><code>{analysis.taskId || (language === "zh" ? "等待 InfiniSynapse 返回…" : "Waiting for InfiniSynapse…")}</code></div></div><div className="progress-help"><strong>{language === "zh" ? "你现在可以离开这个页面" : "You can leave this page"}</strong><p>{language === "zh" ? "任务会在后台继续；刷新、切换页面或稍后回来都不会丢失进度。" : "The task continues in the background and survives refresh or navigation."}</p></div>{analysis.errorMessage && <div className="error-box">{analysis.errorMessage}</div>}<div className="button-row">{analysis.id && stopped && <button className="primary-button" onClick={onRetry}>{language === "zh" ? "尝试恢复" : "Recover"}</button>}<button className="secondary-button" onClick={onBack}>{language === "zh" ? "返回" : "Back"}</button></div></article></section>
+    <section className="page centered-page"><article className="progress-card enhanced-progress"><div className={`agent-orb ${stopped ? "stopped" : ""}`}><img src="/mascot-v2.png" alt="" />{!stopped && <i />}</div><span className="eyebrow">PEEK IS READING</span><h1>{stopped ? (language === "zh" ? "这次没有完成" : "This task did not finish") : (language === "zh" ? "Peek 正在替你先读" : "Peek is reviewing it")}</h1><p>{analysis.progressText}</p><div className="analysis-progress-head"><strong>{stopped ? (language === "zh" ? "已停止" : "Stopped") : `${progress}%`}</strong><span>{language === "zh" ? `已用 ${formatTime(elapsed)} · 预计还需约 ${formatTime(etaSeconds)}` : `${formatTime(elapsed)} elapsed · about ${formatTime(etaSeconds)} left`}</span></div><div className="analysis-progress-bar"><i style={{ width: `${progress}%` }} /></div><div className="progress-steps">{steps.map((step, index) => <div className={progress >= (index + 1) * 23 ? "done" : progress >= index * 23 ? "active" : ""} key={step}><i>{progress >= (index + 1) * 23 ? "✓" : index + 1}</i><span>{step}</span></div>)}</div><div className="task-facts"><div><span>{contentLabel}</span><strong>{analysis.title}</strong></div><div><span>{language === "zh" ? "当前进度" : "Progress"}</span><strong>{analysisStageLabel(analysis.status, language)}</strong></div></div><div className="progress-help"><strong>{language === "zh" ? "可以先去做别的" : "You can leave this page"}</strong><p>{language === "zh" ? "分析完成后会自动出现在历史记录中。" : "The result will appear in History when it is ready."}</p></div>{analysis.errorMessage && <div className="error-box">{analysis.errorMessage}</div>}<div className="button-row">{analysis.id && stopped && <button className="primary-button" onClick={onRetry}>{language === "zh" ? "重新尝试" : "Try again"}</button>}<button className="secondary-button" onClick={onBack}>{language === "zh" ? "返回" : "Back"}</button></div></article></section>
   );
 }
 
@@ -1351,9 +1373,28 @@ function DetailView({ language, analysis, onBack, onState, onNoteSaved }: { lang
   };
   const highlights = result.segments.filter((segment) => segment.decision === "watch").slice(0, 4);
   const valueScore = contentValueScore(result);
-  const matchReason = result.signals.matchReason || (result.signals.match >= 45
-    ? "与当前学习方向有一定关联，建议按观看路线选择重点。"
-    : "与当前技能树关联较弱，可按个人兴趣决定是否保留。");
+  const matchReason = language === "zh"
+    ? result.signals.match >= 75
+      ? "与你当前关注的方向高度契合，值得优先看。"
+      : result.signals.match >= 50
+        ? "与你当前关注的方向有一定关联，建议选择重点。"
+        : result.signals.match >= 30
+          ? "与你当前关注的方向关联有限，可按兴趣决定。"
+          : "与你当前关注的方向关联较弱，可以降低优先级。"
+    : result.signals.match >= 75
+      ? "Highly aligned with your current interests."
+      : result.signals.match >= 50
+        ? "Somewhat aligned; focus on the recommended parts."
+        : result.signals.match >= 30
+          ? "Limited alignment; keep it if the topic interests you."
+          : "Low alignment with your current interests.";
+  const matchExplanation = result.personalization
+    ? language === "zh"
+      ? `综合知识关联 ${result.personalization.relevance}%、可获得的新知识 ${result.personalization.knowledgeGain}%、难度适合度 ${result.personalization.difficultyFit}% 和内容含金量得出。书架变化后会重新判断。`
+      : `Combines topic relevance ${result.personalization.relevance}%, new knowledge ${result.personalization.knowledgeGain}%, difficulty fit ${result.personalization.difficultyFit}% and content value. It updates with your shelf.`
+    : language === "zh"
+      ? "综合你的知识方向、可获得的新知识、内容难度和内容含金量得出。"
+      : "Combines your interests, potential learning, difficulty and content value.";
   const valueReason = result.signals.valueReason || (valueScore >= 75
     ? "信息密度、专业度和可信度较高，内容本身值得保留。"
     : "内容有一定信息价值，但深度或原创性较为有限。");
@@ -1379,8 +1420,8 @@ function DetailView({ language, analysis, onBack, onState, onNoteSaved }: { lang
   return (
     <section className="page page-view">
       <div className="detail-top"><button className="back-button" onClick={onBack}>← {language === "zh" ? "返回" : "Back"}</button><div className="detail-actions">{shelved ? <><button className="secondary-button shelf-confirmed" disabled>✓ {language === "zh" ? "已在书架" : "On shelf"}</button><button className="icon-button" disabled={shelfBusy} onClick={() => changeShelf("archived")} aria-label={language === "zh" ? "移出书架" : "Remove from shelf"} title={language === "zh" ? "移出书架并同步技能树" : "Remove from shelf and sync skill tree"}>−</button></> : <><button className="primary-button" disabled={shelfBusy} onClick={() => changeShelf("shelved")}>＋ {language === "zh" ? "纳入书架" : "Add to shelf"}</button><button className="secondary-button" disabled={shelfBusy} onClick={() => changeShelf("archived")}>{language === "zh" ? "暂不纳入" : "Not now"}</button></>}</div></div>
-      <div className="report-language-bar"><div><span>文A</span><p><strong>{language === "zh" ? "分析报告语言" : "Report language"}</strong><small>{language === "zh" ? "界面切换不会自动消耗额度；需要时再翻译，结果会缓存。" : "UI switching does not auto-translate. Translate only when needed; results are cached."}</small></p></div><div className="report-language-actions"><button className={reportLanguage === "zh" ? "active" : ""} disabled={translationBusy} onClick={() => translateReport("zh")}>中文</button><button className={reportLanguage === "en" ? "active" : ""} disabled={translationBusy} onClick={() => translateReport("en")}>{translationBusy ? (language === "zh" ? "转换中…" : "Translating…") : "English"}</button></div>{translationError && <span className="report-language-error">{translationError}</span>}</div>
-      <div className="detail-hero"><div className="detail-cover"><div className="cover-grid" /><span>{analysis.source.split(/[·｜|]/)[0].toUpperCase()}</span><small>PUBLIC {contentLabel.toUpperCase()} · ANALYZED</small>{isVideo ? <i>{timecode(result.totalDurationSeconds)}</i> : <i>{result.segments.length} 节</i>}</div><div className="detail-copy"><span className="meta">{analysis.source}</span><h1>{analysis.title}</h1><p>{result.summary}</p><div className="speaker-row"><span className="speaker-avatar">P</span><div><strong>Peek · InfiniSynapse Agent</strong><small>{language === "zh" ? (isVideo ? "已核验时间码与内容信号" : "已核验原文章节与内容信号") : (isVideo ? "Timestamps and signals verified" : "Sections and content signals verified")}</small></div></div></div><div className="verdict-card"><span className="verdict-label"><i />{language === "zh" ? "Peek 的结论" : "Peek's verdict"}</span><strong>{verdictLabel(result.verdict, language)}</strong><p>{language === "zh" ? (isVideo ? `只看 ${result.segments.filter((segment) => segment.decision === "watch").length} 个片段，共 ${formatTime(result.recommendedSeconds)}。` : `建议优先阅读 ${result.segments.filter((segment) => segment.decision === "watch").length} 个章节。`) : `${result.segments.filter((segment) => segment.decision === "watch").length} recommended sections.`}</p><div><span>{language === "zh" ? "与你的匹配度" : "Match"}</span><b>{result.signals.match}%</b></div></div></div>
+      <div className="report-language-bar"><div><span>文A</span><p><strong>{language === "zh" ? "报告语言" : "Report language"}</strong><small>{language === "zh" ? "需要时再转换，已经转换过的版本可以直接再看。" : "Translate when needed; previously translated versions are ready to revisit."}</small></p></div><div className="report-language-actions"><button className={reportLanguage === "zh" ? "active" : ""} disabled={translationBusy} onClick={() => translateReport("zh")}>中文</button><button className={reportLanguage === "en" ? "active" : ""} disabled={translationBusy} onClick={() => translateReport("en")}>{translationBusy ? (language === "zh" ? "转换中…" : "Translating…") : "English"}</button></div>{translationError && <span className="report-language-error">{translationError}</span>}</div>
+      <div className="detail-hero"><div className="detail-cover"><div className="cover-grid" /><span>{analysis.source.split(/[·｜|]/)[0].toUpperCase()}</span><small>{contentLabel.toUpperCase()} · PEEKED</small>{isVideo ? <i>{timecode(result.totalDurationSeconds)}</i> : <i>{result.segments.length} 节</i>}</div><div className="detail-copy"><span className="meta">{analysis.source}</span><h1>{analysis.title}</h1><p>{result.summary}</p><div className="speaker-row"><span className="speaker-avatar">P</span><div><strong>Peek 内容助手</strong><small>{language === "zh" ? (isVideo ? "已整理重点和观看路线" : "已整理重点和阅读路线") : (isVideo ? "Highlights and viewing route ready" : "Highlights and reading route ready")}</small></div></div></div><div className="verdict-card"><span className="verdict-label"><i />{language === "zh" ? "Peek 的结论" : "Peek's verdict"}</span><strong>{verdictLabel(result.verdict, language)}</strong><p>{language === "zh" ? (isVideo ? `只看 ${result.segments.filter((segment) => segment.decision === "watch").length} 个片段，共 ${formatTime(result.recommendedSeconds)}。` : `建议优先阅读 ${result.segments.filter((segment) => segment.decision === "watch").length} 个章节。`) : `${result.segments.filter((segment) => segment.decision === "watch").length} recommended sections.`}</p><div><span>{language === "zh" ? "与你的匹配度" : "Match"}</span><b>{result.signals.match}%</b></div></div></div>
       <div className="detail-body">
         <article className="route-panel"><div className="section-head"><div><span className="eyebrow">{isVideo ? "YOUR WATCHING ROUTE" : "YOUR READING ROUTE"}</span><h2>{language === "zh" ? (isVideo ? "你的观看路线" : "你的阅读路线") : (isVideo ? "Your watching route" : "Your reading route")}</h2><p>{language === "zh" ? (isVideo ? `完整视频 ${formatTime(result.totalDurationSeconds)}，只保留能推动当前项目的部分。` : "按原文章节定位，先读最能推动当前项目的部分。") : (isVideo ? `From ${formatTime(result.totalDurationSeconds)}, only keep what moves your project forward.` : "Jump directly to the sections that move your current project forward.")}</p></div>{isVideo && <div className="time-saved"><span>{language === "zh" ? "预计节省" : "TIME SAVED"}</span><strong>{formatTime(result.savedSeconds)}</strong></div>}</div>
           {isVideo && <div className="video-timeline"><div className="timeline-bar">{result.segments.map((segment) => <i key={segment.id} className={`dynamic-segment ${segment.decision}`} style={{ left: `${(segment.startSeconds / result.totalDurationSeconds) * 100}%`, width: `${Math.max(1, ((segment.endSeconds - segment.startSeconds) / result.totalDurationSeconds) * 100)}%` }} />)}</div><div className="timeline-labels"><span>00:00</span><span>{timecode(result.totalDurationSeconds / 4)}</span><span>{timecode(result.totalDurationSeconds / 2)}</span><span>{timecode(result.totalDurationSeconds * 0.75)}</span><span>{timecode(result.totalDurationSeconds)}</span></div></div>}
@@ -1407,12 +1448,10 @@ function DetailView({ language, analysis, onBack, onState, onNoteSaved }: { lang
           <article className="qa-card"><div className="aside-heading"><div><span className="eyebrow">ASK PEEK</span><h3>{language === "zh" ? "针对这篇内容提问" : "Ask about this content"}</h3></div><b>?</b></div><p>{language === "zh" ? "回答只依据当前分析报告；证据不足时会明确说明。" : "Answers are grounded in this report and flag missing evidence."}</p><textarea value={question} onChange={(event) => setQuestion(event.target.value)} maxLength={800} placeholder={language === "zh" ? "例如：视频提到的三个要素具体是什么？" : "e.g. What exactly are the three elements mentioned?"} /><button className="primary-button" disabled={askBusy || question.trim().length < 2} onClick={askPeek}>{askBusy ? (language === "zh" ? "Peek 正在查找依据…" : "Peek is checking evidence…") : (language === "zh" ? "向 Peek 提问" : "Ask Peek")}</button>{askError && <div className="qa-error">{askError}</div>}{answer && <div className="qa-answer"><strong>{language === "zh" ? "回答" : "Answer"}</strong><p>{answer.answer}</p><button onClick={async () => { await api("/api/notes", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ meetingId: analysis.meetingId, segmentId: `qa:${Date.now()}`, content: `Q：${question}\n\n${answer.note}` }) }); onNoteSaved(); }}>{language === "zh" ? "＋ 加入这篇内容的笔记" : "+ Add to this content's notes"}</button></div>}</article>
           <article className="why-card highlight-card"><div className="aside-heading"><div><span className="eyebrow">HIGHLIGHTS</span><h3>{language === "zh" ? "精华内容" : "Highlights"}</h3></div><b>{highlights.length}</b></div><ul>{highlights.map((item) => <li key={item.id}><i /><span><strong>{item.title}</strong><small>{item.value}</small></span></li>)}</ul></article>
           <article className="score-card">
-            <div className="score-block match-score"><div><span>{language === "zh" ? "有效匹配度" : "Effective match"}</span><em>{scoreBand(result.signals.match, language)}</em></div><strong>{result.signals.match}<small>%</small></strong><p>{matchReason}</p><i><b style={{ width: `${result.signals.match}%` }} /></i></div>
-            {result.personalization && <div className="match-formula"><strong>{language === "zh" ? "Peek Match v2 · 随当前书架动态重算" : "Peek Match v2 · recalculated from your current shelf"}</strong><p>{language === "zh" ? "计算目标内容时会排除它自己，避免自我匹配。" : "The target item is excluded to avoid matching against itself."}</p><div>{[[language === "zh" ? "技能关联" : "Skill relevance", result.personalization.relevance], [language === "zh" ? "知识增益" : "Knowledge gain", result.personalization.knowledgeGain], [language === "zh" ? "难度适配" : "Difficulty fit", result.personalization.difficultyFit]].map(([label, value]) => <span key={String(label)}><small>{label}</small><b>{value}%</b></span>)}</div><code>({result.personalization.skillFit} × {result.personalization.valueMultiplier.toFixed(2)}) ≈ {result.signals.match}</code></div>}
+            <div className="score-block match-score"><div><span className="score-label">{language === "zh" ? "与你的匹配度" : "Your match"}<InfoTip label={language === "zh" ? "匹配度说明" : "About this score"}>{matchExplanation}</InfoTip></span><em>{scoreBand(result.signals.match, language)}</em></div><strong>{result.signals.match}<small>%</small></strong><p>{matchReason}</p><i><b style={{ width: `${result.signals.match}%` }} /></i></div>
             <div className="score-block value-score"><div><span>{language === "zh" ? "内容含金量" : "Content value"}</span><em>{scoreBand(valueScore, language)}</em></div><strong>{valueScore}<small>%</small></strong><p>{valueReason}</p><i><b style={{ width: `${valueScore}%` }} /></i></div><div className="score-details">{[[language === "zh" ? "专业深度" : "Depth", result.signals.depth], [language === "zh" ? "来源可信" : "Reliability", result.signals.sourceReliability], [language === "zh" ? "推广占比" : "Promotion", result.signals.promotion]].map(([label, value]) => <div key={String(label)}><span>{label}</span><b>{value}%</b></div>)}</div>
           </article>
           <article className={`shelf-decision-card ${shelved ? "is-shelved" : ""}`}><div className="memory-title"><img src="/mascot-v2.png" alt="" /><div><strong>{shelved ? (language === "zh" ? "已同步到技能树" : "Skill tree updated") : (language === "zh" ? "是否值得进入你的知识体系？" : "Add this to your knowledge system?")}</strong><p>{shelved ? (language === "zh" ? "移出书架时会同步撤回" : "Removing it also reverts the update") : (language === "zh" ? "由你确认，不会自动替你做决定" : "You decide; nothing is added automatically")}</p></div></div><span>{result.newKnowledge.map((item) => item.topic).join(" / ") || (language === "zh" ? "暂无新增技能节点" : "No new skill nodes")}</span>{!shelved && <button className="primary-button" disabled={shelfBusy} onClick={() => changeShelf("shelved")}>{language === "zh" ? "纳入书架并更新技能树" : "Add to shelf and update skill tree"}</button>}</article>
-          <article className="task-card"><span>InfiniSynapse taskId</span><code>{analysis.taskId}</code></article>
         </aside>
       </div>
     </section>
@@ -1441,8 +1480,8 @@ function AddMeeting({ language, demo, onClose, onStart, notify }: { language: La
         </div>
         <button className="advanced-toggle" onClick={() => setAdvanced((open) => !open)}>{advanced ? "−" : "＋"} {language === "zh" ? (contentType === "video" ? "高级输入：我已经有字幕" : "高级输入：我已经有原文") : "Advanced: paste source text"}</button>
         {advanced && <div className="advanced-panel"><textarea value={transcript} onChange={(event) => setTranscript(event.target.value)} placeholder={language === "zh" ? (contentType === "video" ? "粘贴带时间码的 SRT / VTT / TXT…" : "粘贴文章或论文正文…") : "Paste source text…"} maxLength={80000} /><div>{contentType === "video" && demo && <button className="text-button" onClick={() => { setTranscript(demo.demo.transcript); setTitle(demo.demo.title); setContentUrl(""); notify(language === "zh" ? "已载入内置示例" : "Demo loaded"); }}>{language === "zh" ? "载入内置示例" : "Load demo"}</button>}<span>{transcript.length.toLocaleString()} / 80,000</span></div></div>}
-        <div className="privacy-strip"><img src="/mascot-v2.png" alt="" /><div><strong>{language === "zh" ? "只分析，不保存原内容" : "Analyze only. Source media is not stored."}</strong><p>{language === "zh" ? "链接只用于本次任务；分析完成后保留结构化结果、阅读或观看路线和你的笔记。" : "Only the result, route and notes are retained."}</p></div></div>
-        <div className="modal-footer"><p>{language === "zh" ? "真实分析会消耗 1 次今日额度，并生成可核验 taskId。" : "Uses one daily analysis and creates a verifiable taskId."}</p><button className="secondary-button" onClick={onClose}>{language === "zh" ? "取消" : "Cancel"}</button><button className="primary-button" disabled={advanced ? transcript.trim().length < 500 : !validUrl} onClick={() => { notify(language === "zh" ? "任务已提交，正在加入运行列表" : "Task submitted and added to the running list"); advanced ? onStart({ contentType, title, source: `${typeLabel}文本`, transcript }) : onStart({ contentType, contentUrl, title }); }}>{language === "zh" ? "开始真实分析" : "Start real analysis"} →</button></div>
+        <div className="privacy-strip"><img src="/mascot-v2.png" alt="" /><div><strong>{language === "zh" ? "只分析，不保存原内容" : "Analyze only. Source media is not stored."}</strong><p>{language === "zh" ? "链接只用于本次分析；完成后只保留结果、阅读或观看路线和你的笔记。" : "Only the result, route and notes are retained."}</p></div></div>
+        <div className="modal-footer"><p>{language === "zh" ? "本次分析使用 1 次今日额度。" : "This uses one analysis from today's allowance."}</p><button className="secondary-button" onClick={onClose}>{language === "zh" ? "取消" : "Cancel"}</button><button className="primary-button" disabled={advanced ? transcript.trim().length < 500 : !validUrl} onClick={() => { notify(language === "zh" ? "已加入分析列表" : "Added to the analysis list"); advanced ? onStart({ contentType, title, source: `${typeLabel}文本`, transcript }) : onStart({ contentType, contentUrl, title }); }}>{language === "zh" ? "开始分析" : "Start analysis"} →</button></div>
       </section>
     </div>
   );

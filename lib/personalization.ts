@@ -146,6 +146,14 @@ export function recalculatePersonalMatch(
   const match = clamp(skillFit * valueMultiplier);
   const fingerprint = profileFingerprint(profile);
   const basis = `技能关联 ${relevance}% × 知识增益 ${knowledgeGain}% × 难度适配 ${difficultyFit}%，再乘内容含金量系数 ${valueMultiplier.toFixed(2)}`;
+  const matchReason =
+    match >= 75
+      ? "与当前关注的知识方向高度契合，值得优先投入时间。"
+      : match >= 50
+        ? "与当前关注的知识方向有一定关联，建议选择重点内容。"
+        : match >= 30
+          ? "与当前关注的知识方向关联有限，可按兴趣决定是否保留。"
+          : "与当前关注的知识方向关联较弱，可以降低观看优先级。";
   const personalization: PersonalizationScore = {
     formulaVersion: "peek.match.v2",
     profileFingerprint: fingerprint,
@@ -169,7 +177,7 @@ export function recalculatePersonalMatch(
     signals: {
       ...result.signals,
       match,
-      matchReason: `${basis}，最终匹配度 ${match}%。`,
+      matchReason,
     },
     skillAssessment: {
       protocolVersion: "peek.skill.v2",

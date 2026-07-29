@@ -83,7 +83,7 @@ export function ConnectInfiniModal({
 
         {!status.configured && !status.authenticated && (
           <div className="auth-not-configured">
-            {language === "zh" ? "站点管理员尚未配置 InfiniSynapse SSO 凭证；访客模式不受影响。" : "InfiniSynapse SSO credentials are not configured yet. Guest mode is unaffected."}
+            {language === "zh" ? "登录暂时不可用，你仍然可以继续以访客身份使用全部核心功能。" : "Sign-in is temporarily unavailable. You can still use all core features as a guest."}
           </div>
         )}
         {error && <div className="error-box">{error}</div>}
