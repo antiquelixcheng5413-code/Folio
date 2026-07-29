@@ -63,13 +63,16 @@ export async function POST(request: Request) {
   const singleItem = translatableItems.length === 1;
   if (singleItem) {
     const chunks = translationChunks(translatableItems[0].content);
-    const translations = await Promise.all(chunks.map((sourceText, index) => answerLearningQuestion({
-      title: `Peek notebook translation ${index + 1}/${chunks.length}`,
-      question: "Translate the complete SOURCE_TEXT chunk into natural English Markdown. Preserve every heading, list, emphasis, number, timestamp, name, technical term, piece of evidence, and follow-up question. Do not summarize, explain your plan, or add commentary. Put only the full translation in answer.",
-      language: "en",
-      resultJson: "{}",
-      sourceText,
-    })));
+    const translations: Awaited<ReturnType<typeof answerLearningQuestion>>[] = [];
+    for (let index = 0; index < chunks.length; index += 1) {
+      translations.push(await answerLearningQuestion({
+        title: `Peek notebook translation ${index + 1}/${chunks.length}`,
+        question: "Translate the complete SOURCE_TEXT chunk into natural English Markdown. Preserve every heading, list, emphasis, number, timestamp, name, technical term, piece of evidence, and follow-up question. Do not summarize, explain your plan, or add commentary. Put only the full translation in answer.",
+        language: "en",
+        resultJson: "{}",
+        sourceText: chunks[index],
+      }));
+    }
     const translatedChunks = translations.map((translation) => translation.answer.answer.trim());
     const invalidChunk = translatedChunks.some((content) => {
       const cjkCount = content.match(/[\u3400-\u9fff]/g)?.length || 0;
@@ -81,6 +84,9 @@ export async function POST(request: Request) {
       return json({ error: "英文笔记没有完整生成，请重试" }, { status: 502 }, session.cookie);
     }
     const content = translatedChunks.join("\n\n");
+    if (content.length < translatableItems[0].content.length * 0.45) {
+      return json({ error: "英文笔记没有完整生成，请重试" }, { status: 502 }, session.cookie);
+    }
     const translated = sourceItems.map((item) => ({
       id: item.id,
       content: item.id === translatableItems[0].id ? content : item.content,
