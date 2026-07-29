@@ -30,6 +30,16 @@ export function buildStructuredNote(result: XianjianAnalysisResult) {
   const knowledgeLines = result.newKnowledge.slice(0, 7).map(
     (item) => `- **${item.topic}**：${item.evidence}`
   );
+  const matchSummary = result.signals.match >= 75
+    ? "与你正在学习或推进的方向高度相关，适合优先吸收。"
+    : result.signals.match >= 45
+      ? "与你当前方向有部分关联，建议先看标出的核心部分。"
+      : "与你当前方向关联较少，可按兴趣决定是否投入时间。";
+  const valueSummary = result.signals.value >= 75
+    ? "内容本身信息密度和可信度较高，值得保留。"
+    : result.signals.value >= 45
+      ? "内容有可用信息，但更适合选择性阅读。"
+      : "有效信息较少或重复较多，不建议投入过多时间。";
   return [
     "# 核心结论",
     result.summary,
@@ -47,8 +57,8 @@ export function buildStructuredNote(result: XianjianAnalysisResult) {
     ...(knowledgeLines.length ? knowledgeLines : ["- 暂无明确新增知识。"]),
     "",
     "## 对我的价值",
-    `- **匹配度 ${result.signals.match}%**：${result.signals.matchReason}`,
-    `- **内容含金量 ${result.signals.value}%**：${result.signals.valueReason}`,
+    `- **匹配度 ${result.signals.match}%**：${matchSummary}`,
+    `- **内容含金量 ${result.signals.value}%**：${valueSummary}`,
     "",
     "## 可以继续追问",
     "- 这篇内容最关键的概念分别是什么？",

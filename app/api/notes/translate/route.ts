@@ -9,6 +9,7 @@ type NoteRow = {
 
 export async function POST(request: Request) {
   const session = await getSession(request);
+  try {
   const payload = await request.json().catch(() => ({})) as {
     meetingId?: string;
     language?: string;
@@ -36,6 +37,10 @@ export async function POST(request: Request) {
   if (cached) return json({ items: JSON.parse(cached.contentJson), cached: true }, {}, session.cookie);
 
   const sourceItems = rows.results.map(({ id, content }) => ({ id, content }));
+  const translatableItems = sourceItems.filter((item) => /[\u3400-\u9fff]/.test(item.content));
+  if (!translatableItems.length) {
+    return json({ items: sourceItems, cached: true }, {}, session.cookie);
+  }
   const task = await runInfiniJsonTask(`你是 Peek 的双语学习笔记编辑。请将以下中文笔记完整转换为自然、准确的英文学习笔记。
 
 要求：
@@ -47,23 +52,38 @@ export async function POST(request: Request) {
 6. 只输出严格 JSON：{"items":[{"id":"原 id","content":"英文 Markdown"}]}。
 
 <NOTE_ITEMS>
-${JSON.stringify(sourceItems).slice(0, 60000)}
+${JSON.stringify(translatableItems).slice(0, 60000)}
 </NOTE_ITEMS>`,
-    (value) => Array.isArray(value.items) && value.items.length === sourceItems.length
+    (value) => Array.isArray(value.items) && value.items.length === translatableItems.length
   );
-  const translated = Array.isArray((task.result as Record<string, unknown>).items)
+  const translatedItems = Array.isArray((task.result as Record<string, unknown>).items)
     ? (task.result as { items: Array<{ id?: unknown; content?: unknown }> }).items
       .map((item) => ({ id: String(item.id || ""), content: String(item.content || "").trim() }))
       .filter((item) => item.id && item.content)
     : [];
-  const sourceIds = new Set(sourceItems.map((item) => item.id));
-  if (translated.length !== sourceItems.length || translated.some((item) => !sourceIds.has(item.id))) {
+  const translatableIds = new Set(translatableItems.map((item) => item.id));
+  if (
+    translatedItems.length !== translatableItems.length ||
+    translatedItems.some((item) => !translatableIds.has(item.id))
+  ) {
     return json({ error: "英文笔记没有完整生成，请重试" }, { status: 502 }, session.cookie);
   }
+  const translatedById = new Map(translatedItems.map((item) => [item.id, item.content]));
+  const translated = sourceItems.map((item) => ({
+    id: item.id,
+    content: translatedById.get(item.id) || item.content,
+  }));
   await db.prepare(`INSERT OR REPLACE INTO notebook_translations
     (cache_key, meeting_id, session_id, language, source_hash, content_json)
     VALUES (?, ?, ?, ?, ?, ?)`)
     .bind(cacheKey, payload.meetingId, session.sessionId, language, sourceHash, JSON.stringify(translated))
     .run();
   return json({ items: translated, cached: false, taskId: task.taskId }, {}, session.cookie);
+  } catch (error) {
+    return json(
+      { error: error instanceof Error ? error.message : "英文笔记暂时无法生成，请重试" },
+      { status: 502 },
+      session.cookie
+    );
+  }
 }
