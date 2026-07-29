@@ -1401,9 +1401,13 @@ function DetailView({ language, analysis, onBack, onState, onNoteSaved }: { lang
   const shelved = isOnShelf(analysis.meetingState);
   const isVideo = analysis.contentType === "video";
   const contentLabel = contentTypeLabel(analysis.contentType, language);
-  const shelfTopics = (result.skillAssessment?.skills || [])
+  const genericShelfTopics = new Set(["数学史", "数学", "几何测度论", "调和分析", "证明策略", "核心方法", "技术细节"]);
+  const skillNames = (result.skillAssessment?.skills || [])
     .map((skill) => skill.name)
-    .filter(Boolean)
+    .filter((name) => name.length <= 20 && !/[，。；！？：]/.test(name) && !/(已被|获得|发表于|提供了|完成了|证明了|是否|将)/.test(name));
+  const segmentTopics = result.segments.flatMap((segment) => segment.tags || []);
+  const shelfTopics = [...new Set([...skillNames, ...segmentTopics])]
+    .filter((name) => name.length <= 20 && !genericShelfTopics.has(name))
     .slice(0, 6);
   const changeShelf = async (state: string) => {
     setShelfBusy(true);
