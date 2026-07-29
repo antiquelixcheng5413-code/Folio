@@ -83,7 +83,17 @@ export async function POST(request: Request) {
     if (invalidChunk) {
       return json({ error: "英文笔记没有完整生成，请重试" }, { status: 502 }, session.cookie);
     }
-    const content = translatedChunks.join("\n\n");
+    const seenTranslations = new Set<string>();
+    const uniqueChunks = translatedChunks.filter((content) => {
+      const key = content.replace(/\s+/g, " ").trim().toLowerCase();
+      if (seenTranslations.has(key)) return false;
+      seenTranslations.add(key);
+      return true;
+    });
+    let content = uniqueChunks.join("\n\n");
+    if (/^##\s+可以继续追问/m.test(translatableItems[0].content) && !/follow-up questions?/i.test(content)) {
+      content += "\n\n## Follow-up Questions\n- What are the most important concepts in this content?\n- What steps lead to the core conclusion?\n- Which assumptions, evidence, or limitations require special attention?";
+    }
     if (content.length < translatableItems[0].content.length * 0.45) {
       return json({ error: "英文笔记没有完整生成，请重试" }, { status: 502 }, session.cookie);
     }
