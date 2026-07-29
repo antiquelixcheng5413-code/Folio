@@ -44,7 +44,7 @@ async function searchPublicVideos(keyword: string): Promise<SearchResult[]> {
   const response = await fetch(`https://www.bing.com/search?format=rss&q=${encodeURIComponent(query)}`, {
     headers: {
       accept: "application/rss+xml, application/xml;q=0.9, text/xml;q=0.8",
-      "user-agent": "Xianjian-Discovery/1.0",
+      "user-agent": "Peek-Discovery/1.0",
     },
     signal: AbortSignal.timeout(12_000),
   });

@@ -112,7 +112,7 @@ ${typeLabel}正文结束。请用原文小标题和短引文标记每个阅读�
   const segmentEvidence = contentType === "video"
     ? "每个片段标记 watch 或 skip，并说明对该用户的具体价值和字幕证据。"
     : "每个片段标记 watch 或 skip，并用通俗中文说明该章节讲了什么、为何值得读或可跳过。";
-  return `你是“未读先知”的内容价值分析 Agent。你必须基于用户画像逐段分析${typeLabel}，禁止编造来源中不存在的信息。
+  return `你是“先鉴 Peek”的内容价值分析 Agent。你必须基于用户画像逐段分析${typeLabel}，禁止编造来源中不存在的信息。
 
 自动学习画像（由用户已纳入书架的内容持续累计，不要求用户手填）：
 - 方向：${profile.direction}

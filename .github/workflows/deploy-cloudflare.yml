@@ -1,4 +1,4 @@
-name: Deploy Xianjian to Cloudflare
+name: Deploy Peek to Cloudflare
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: xianjian-production
+  group: peek-production
   cancel-in-progress: false
 
 jobs:

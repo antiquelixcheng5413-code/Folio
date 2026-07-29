@@ -2,17 +2,17 @@ import assert from "node:assert/strict";
 import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 
-test("build contains the Unread Insight product and deployable worker", async () => {
+test("build contains the Peek product and deployable worker", async () => {
   const [page, layout, client, styles] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/xianjian-app.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/peek-app.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     access(new URL("../dist/server/index.js", import.meta.url)),
     access(new URL("../dist/.openai/hosting.json", import.meta.url)),
   ]);
-  assert.match(page, /XianjianApp/);
-  assert.match(layout, /未读先知｜先判断值不值得看/);
+  assert.match(page, /PeekApp/);
+  assert.match(layout, /先鉴 Peek｜先判断值不值得看/);
   assert.match(client, /InfiniSynapse Agent/);
   assert.match(client, /内容链接/);
   assert.match(client, /稍后看/);
@@ -51,11 +51,11 @@ assert.match(client, /titleMode/);
   assert.match(client, /searchParams\.set\("analysis"/);
   assert.match(client, /isAnalysisActive\(item\.status\)/);
   assert.match(client, /side-note-open/);
-  assert.match(client, /未读先知/);
+  assert.match(client, /Peek/);
   assert.match(client, /\/mascot-v2\.png/);
   assert.match(styles, /\.side-note \{[\s\S]*min-height: 214px/);
   assert.match(styles, /\.mini-mascot \{[\s\S]*width: 128px/);
-  assert.doesNotMatch(client, />先鉴</);
+  assert.match(client, /<strong>先鉴<\/strong>/);
   assert.match(client, /route-meta/);
   assert.match(client, /route-decision/);
   assert.match(client, /analysisRequestVersion/);

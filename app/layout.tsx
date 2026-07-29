@@ -12,24 +12,24 @@ export async function generateMetadata(): Promise<Metadata> {
     requestHeaders.get("x-forwarded-proto") || (host.startsWith("localhost") ? "http" : "https");
   const origin = `${protocol}://${host}`;
   const description =
-    "面向知识工作者的个性化会议筛选工具：只需提供公开视频链接，真实 Agent 会给出价值判断、时间码路线和可沉淀的学习笔记。";
+    "先鉴 Peek 是你的内容价值判断伙伴：分享视频、文章或论文，先看含金量和匹配度，再决定是否投入时间。";
   return {
     metadataBase: new URL(origin),
-    title: "未读先知｜先判断值不值得看，再决定看什么",
+    title: "先鉴 Peek｜先判断值不值得看",
     description,
     icons: { icon: "/favicon.svg", shortcut: "/favicon.svg" },
     openGraph: {
       type: "website",
-      title: "未读先知｜先判断值不值得看，再决定看什么",
+      title: "先鉴 Peek｜把时间留给真正值得看的内容",
       description,
       url: origin,
-      images: [{ url: `${origin}/og.png`, width: 1731, height: 909, alt: "未读先知产品预览" }],
+      images: [{ url: `${origin}/og-peek.png`, width: 1536, height: 1024, alt: "先鉴 Peek 产品预览" }],
     },
     twitter: {
       card: "summary_large_image",
-      title: "未读先知｜会议内容价值判断",
+      title: "先鉴 Peek｜内容价值判断伙伴",
       description,
-      images: [`${origin}/og.png`],
+      images: [`${origin}/og-peek.png`],
     },
   };
 }

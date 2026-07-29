@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 
 const baseUrl =
+  process.env.PEEK_TEST_URL ||
   process.env.XIANJIAN_TEST_URL ||
-  "https://xianjian-conference-os.sleek-shrew-6035.chatgpt.site";
+  "https://peek.antiquelixcheng5413.workers.dev";
 const timeoutMs = Number(process.env.XIANJIAN_TIMEOUT_MS || 12 * 60 * 1000);
 
 let cookie = "";

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-const baseUrl = process.env.XIANJIAN_TEST_URL || "http://localhost:3001";
+const baseUrl = process.env.PEEK_TEST_URL || process.env.XIANJIAN_TEST_URL || "http://localhost:3001";
 
 async function request(path, init = {}, cookie = "") {
   const response = await fetch(`${baseUrl}${path}`, {

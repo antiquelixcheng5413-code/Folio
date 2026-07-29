@@ -181,7 +181,7 @@ const copy = {
     selective: "选择性看",
     skip: "可以跳过",
     open: "看路线",
-    noItems: "这里还没有记录。添加视频、文章或论文链接，Mira 会替你先读。",
+    noItems: "这里还没有记录。添加视频、文章或论文链接，Peek 会替你先读。",
   },
   en: {
     workspace: "Workspace",
@@ -199,7 +199,7 @@ const copy = {
     selective: "Watch selectively",
     skip: "Safe to skip",
     open: "View route",
-    noItems: "No records yet. Add a video, article or paper for Mira to review.",
+    noItems: "No records yet. Add a video, article or paper for Peek to review.",
   },
 } as const;
 
@@ -237,6 +237,10 @@ async function api<T = Record<string, unknown>>(url: string, init?: RequestInit)
   return payload;
 }
 
+function PeekMark({ compact = false }: { compact?: boolean }) {
+  return <span className={`peek-mark${compact ? " compact" : ""}`} aria-hidden="true"><i /></span>;
+}
+
 function NavIcon({ kind }: { kind: "home" | "tasks" | "later" | "history" | "notes" | "skills" }) {
   const paths = {
     home: <><path d="M4 10.8 12 4l8 6.8V20H4z" /><path d="M9 20v-6h6v6" /></>,
@@ -249,7 +253,7 @@ function NavIcon({ kind }: { kind: "home" | "tasks" | "later" | "history" | "not
   return <svg viewBox="0 0 24 24" aria-hidden="true">{paths[kind]}</svg>;
 }
 
-export default function XianjianApp() {
+export default function PeekApp() {
   const [view, setView] = useState<View>("home");
   const [previousView, setPreviousView] = useState<View>("home");
   const [language, setLanguage] = useState<Language>("zh");
@@ -550,7 +554,7 @@ export default function XianjianApp() {
                     id: String(data.analysisId || current.id),
                     taskId: data.taskId ? String(data.taskId) : current.taskId,
                     status: "running",
-                    progressText: String(data.stage || "Mira 正在打开视频并读取字幕"),
+                    progressText: String(data.stage || "Peek 正在打开视频并读取字幕"),
                   }
                 : current
             );
@@ -637,15 +641,15 @@ export default function XianjianApp() {
   const pageName = t[view === "progress" || view === "detail" ? "detail" : view];
 
   if (loading) {
-    return <main className="loading-screen"><div className="brand-mark">先</div><p>正在准备你的学习空间…</p></main>;
+    return <main className="loading-screen"><PeekMark /><p>Peek 正在准备你的学习空间…</p></main>;
   }
 
   return (
     <div className="app-shell final-ui">
       <aside className="sidebar">
         <button className="brand" onClick={() => navigate("home")} aria-label={t.home}>
-          <span className="brand-mark">未</span>
-          <span className="brand-copy"><strong>未读先知</strong><i aria-hidden="true" /><small>{language === "zh" ? "学习决策助手" : "Learning guide"}</small></span>
+          <PeekMark />
+          <span className="brand-copy"><strong>先鉴</strong><i aria-hidden="true" /><small>{language === "zh" ? "PEEK · 学习决策助手" : "PEEK · Learning guide"}</small></span>
         </button>
         <nav className="main-nav" aria-label="主要导航">
           {(["home", "tasks", "later", "history", "notes", "skills"] as const).map((item) => (
@@ -659,7 +663,7 @@ export default function XianjianApp() {
         </nav>
         <div className={`side-note ${sidebarHasActiveAnalysis ? "is-active" : ""}`}>
           <div className="mini-mascot"><img src="/mascot-v2.png" alt="" /></div>
-          <strong>{sidebarHasActiveAnalysis ? (language === "zh" ? `Mira 正在分析 ${activeTaskCount} 项` : `Mira is analyzing ${activeTaskCount}`) : (language === "zh" ? "暂无进行中的分析" : "No active analysis")}</strong>
+          <strong>{sidebarHasActiveAnalysis ? (language === "zh" ? `Peek 正在分析 ${activeTaskCount} 项` : `Peek is analyzing ${activeTaskCount}`) : (language === "zh" ? "暂无进行中的分析" : "No active analysis")}</strong>
           <span>{sidebarHasActiveAnalysis ? sidebarAnalysisTitle : language === "zh" ? "添加公开视频、文章或论文即可开始" : "Add a public video, article or paper to begin"}</span>
           <div className="progress"><i style={{ width: sidebarHasActiveAnalysis ? "68%" : "0%" }} /></div>
           <small>{sidebarHasActiveAnalysis ? sidebarProgressText : language === "zh" ? "这里不会显示虚构任务" : "No placeholder task is shown here"}</small>
@@ -833,7 +837,7 @@ function HomeView({
   return (
     <section className="page page-view">
       <div className="page-title home-title">
-        <div><span className="eyebrow">{currentDateLabel(language)}</span><h1>{activeTasks.length ? (language === "zh" ? `Mira 正在分析 ${activeTasks.length} 条内容` : `Mira is analyzing ${activeTasks.length} items`) : items.length ? (language === "zh" ? "Mira 已经替你先看了一轮" : "Mira has previewed the latest content.") : (language === "zh" ? "这是一个干净的学习空间" : "This is a clean learning workspace.")}</h1><p>{activeTasks.length ? (language === "zh" ? "任务会在后台继续运行，你可以随时打开运行列表查看进度。" : "Tasks continue in the background. Open the running list anytime.") : (language === "zh" ? `${meetings.length} 条内容里，${worthCount} 条值得看，${skipCount} 条可以放心跳过。` : `${meetings.length} items, ${worthCount} worth viewing and ${skipCount} safe to skip.`)}</p></div>
+        <div><span className="eyebrow">{currentDateLabel(language)}</span><h1>{activeTasks.length ? (language === "zh" ? `Peek 正在分析 ${activeTasks.length} 条内容` : `Peek is analyzing ${activeTasks.length} items`) : items.length ? (language === "zh" ? "Peek 已经替你先看了一轮" : "Peek has previewed the latest content.") : (language === "zh" ? "这是一个干净的学习空间" : "This is a clean learning workspace.")}</h1><p>{activeTasks.length ? (language === "zh" ? "任务会在后台继续运行，你可以随时打开运行列表查看进度。" : "Tasks continue in the background. Open the running list anytime.") : (language === "zh" ? `${meetings.length} 条内容里，${worthCount} 条值得看，${skipCount} 条可以放心跳过。` : `${meetings.length} items, ${worthCount} worth viewing and ${skipCount} safe to skip.`)}</p></div>
         <div className="saved-pill"><span>{language === "zh" ? "本周省下" : "TIME SAVED"}</span><strong>{formatTime(savedTotal)}</strong></div>
       </div>
       {(candidate || autoDiscoveryEnabled) && (
@@ -852,12 +856,12 @@ function HomeView({
       )}
       <div className="home-grid">
         <article className="companion-card">
-          <div className="companion-copy"><span className="eyebrow">YOUR VIEWING COMPANION</span><h2>Mira</h2><p>{language === "zh" ? "你的先看伙伴" : "Your viewing companion"}</p></div>
-          <div className="mascot-stage"><div className="soft-orbit orbit-a" /><div className="soft-orbit orbit-b" /><img src="/mascot-v2.png" alt="未读先知学习分身" /></div>
+          <div className="companion-copy"><span className="eyebrow">YOUR VIEWING COMPANION</span><h2>Peek</h2><p>{language === "zh" ? "你的先看伙伴" : "Your viewing companion"}</p></div>
+          <div className="mascot-stage"><div className="soft-orbit orbit-a" /><div className="soft-orbit orbit-b" /><img src="/mascot-v2.png" alt="Peek 学习伙伴" /></div>
           <button className={`watching-now ${activeTask ? "is-active" : ""}`} disabled={!activeTask?.analysisId} onClick={() => activeTask?.analysisId && onOpen(activeTask.analysisId)}><div className="watching-line"><i /><strong>{activeTask ? (language === "zh" ? `正在分析 · ${contentTypeLabel(activeTask.contentType || "video", language)}` : `Analyzing · ${contentTypeLabel(activeTask.contentType || "video", language)}`) : (language === "zh" ? "随时待命" : "Ready")}</strong><span>{activeTasks.length > 1 ? `+${activeTasks.length - 1}` : "●"}</span></div><p>{activeTask?.title || (language === "zh" ? "粘贴内容链接即可开始" : "Paste a content link to begin")}</p><div className="progress"><i style={{ width: activeTask ? (activeTask.status === "recovering" ? "76%" : "48%") : "0%" }} /></div><small>{activeTask?.progressText || (language === "zh" ? "视频、文章、论文均可分析" : "Videos, articles and papers supported")}</small></button>
         </article>
         <article className="feed-card">
-          <div className="section-head"><div><h2>{language === "zh" ? "Mira 先替你看过了" : "Mira previewed these for you"}</h2><p>{language === "zh" ? "有用的留下，没必要看的也如实告诉你。" : "Keep the useful parts. Skip the rest."}</p></div><span className="count-badge">{language === "zh" ? `共 ${meetings.length} 场` : `${meetings.length} talks`}</span></div>
+          <div className="section-head"><div><h2>{language === "zh" ? "Peek 先替你看过了" : "Peek previewed these for you"}</h2><p>{language === "zh" ? "有用的留下，没必要看的也如实告诉你。" : "Keep the useful parts. Skip the rest."}</p></div><span className="count-badge">{language === "zh" ? `共 ${meetings.length} 场` : `${meetings.length} talks`}</span></div>
           <div className="filters"><button className="active">{language === "zh" ? "全部" : "All"}</button><button>{language === "zh" ? "值得看" : "Worth it"}</button><button>{language === "zh" ? "可以跳过" : "Skip"}</button></div>
           <div className="feed-list">
             {!items.length && <div className="feed-empty">{copy[language].noItems}</div>}
@@ -926,7 +930,7 @@ function VideoShelfView({ language, items, onOpen, onState }: { language: Langua
               return (
                 <div className="queue-item" key={item.id}>
                   <div className={`video-cover ${index % 3 === 0 ? "cover-agent" : index % 3 === 1 ? "cover-design" : "cover-memory"}`}><span>{item.source.split(/[·｜|]/)[0]}</span><i>{(item.contentType || "video") === "video" ? timecode(result?.totalDurationSeconds || item.durationSeconds) : contentTypeLabel(item.contentType || "video", language)}</i></div>
-                  <div className="queue-copy"><span className="meta"><b className="status keep">{result ? verdictLabel(result.verdict, language) : "待分析"}</b>{item.source}</span><h3>{item.title}</h3><p>{result?.summary || "Mira 正在整理内容路线"}</p><div className="tag-row">{result?.newKnowledge.slice(0, 3).map((tag) => <span key={tag.topic}>{tag.topic}</span>)}</div></div>
+                  <div className="queue-copy"><span className="meta"><b className="status keep">{result ? verdictLabel(result.verdict, language) : "待分析"}</b>{item.source}</span><h3>{item.title}</h3><p>{result?.summary || "Peek 正在整理内容路线"}</p><div className="tag-row">{result?.newKnowledge.slice(0, 3).map((tag) => <span key={tag.topic}>{tag.topic}</span>)}</div></div>
                   <div className="queue-action"><strong>{(item.contentType || "video") === "video" ? formatTime(result?.recommendedSeconds || 0) : `${result?.segments.filter((segment) => segment.decision === "watch").length || 0} ${language === "zh" ? "节" : "sections"}`}</strong><small>{(item.contentType || "video") === "video" ? (language === "zh" ? `原长 ${formatTime(result?.totalDurationSeconds || item.durationSeconds)}` : `of ${formatTime(result?.totalDurationSeconds || item.durationSeconds)}`) : contentTypeLabel(item.contentType || "video", language)}</small>{item.analysisId && <button onClick={() => onOpen(item.analysisId!)}>{language === "zh" ? "打开路线" : "Open route"}</button>}<button className="outline-button" onClick={() => onState(item.id, item.state === "later" ? "shelved" : "later")}>{item.state === "later" ? (language === "zh" ? "移出稍后看" : "Remove from later") : (language === "zh" ? "加入稍后看" : "Watch later")}</button><button className="text-button shelf-remove" onClick={() => onState(item.id, "archived")}>{language === "zh" ? "移出书架" : "Remove from shelf"}</button></div>
                 </div>
               );
@@ -934,7 +938,7 @@ function VideoShelfView({ language, items, onOpen, onState }: { language: Langua
           </div>
         </article>
         <aside className="summary-column">
-          <article className="summary-hero"><span className="eyebrow">{language === "zh" ? "本周观看计划" : "WEEKLY PLAN"}</span><strong>{formatTime(full)}</strong><p>{language === "zh" ? "完整内容时长" : "Full duration"}</p><div className="saving-arrow"><span>{language === "zh" ? "由 Mira 精简为" : "Mira condensed it to"}</span><i>↓</i></div><strong className="accent-number">{formatTime(selected)}</strong><p>{language === "zh" ? "真正需要看的部分" : "What you need to watch"}</p></article>
+          <article className="summary-hero"><span className="eyebrow">{language === "zh" ? "本周观看计划" : "WEEKLY PLAN"}</span><strong>{formatTime(full)}</strong><p>{language === "zh" ? "完整内容时长" : "Full duration"}</p><div className="saving-arrow"><span>{language === "zh" ? "由 Peek 精简为" : "Peek condensed it to"}</span><i>↓</i></div><strong className="accent-number">{formatTime(selected)}</strong><p>{language === "zh" ? "真正需要看的部分" : "What you need to watch"}</p></article>
           <article className="mini-panel"><div className="mini-panel-head"><strong>{language === "zh" ? "按状态分布" : "By status"}</strong><span>{itemsOnShelf.length} {language === "zh" ? "条内容" : "items"}</span></div>{[["shelved", language === "zh" ? "已入架" : "Shelved"], ["later", language === "zh" ? "稍后看" : "Later"], ["completed", language === "zh" ? "已看完" : "Completed"]].map(([state, label]) => <div className="bar-row" key={state}><span>{label}</span><i><b style={{ width: `${percent(state)}%` }} /></i><em>{percent(state)}%</em></div>)}</article>
         </aside>
       </div>
@@ -981,7 +985,7 @@ function NotesView({ language, items, onChanged }: { language: Language; items: 
       "",
       item.content,
     ].filter(Boolean).join("\n")).join("\n\n---\n\n");
-    const markdown = `# ${language === "zh" ? "未读先知笔记本" : "Unread Insight notebook"}\n\n${language === "zh" ? "导出时间" : "Exported"}：${exportedAt}\n\n${entries}`;
+    const markdown = `# ${language === "zh" ? "先鉴 Peek 笔记本" : "Peek notebook"}\n\n${language === "zh" ? "导出时间" : "Exported"}：${exportedAt}\n\n${entries}`;
     const link = document.createElement("a");
     link.href = URL.createObjectURL(new Blob([markdown], { type: "text/markdown;charset=utf-8" }));
     link.download = `unread-insight-notes-${new Date().toISOString().slice(0, 10)}.md`;
@@ -1037,7 +1041,7 @@ function HistoryView({ language, items, savedTotal, onOpen }: { language: Langua
       <div className="page-title"><div><span className="eyebrow">VIEWING HISTORY</span><h1>{copy[language].history}</h1><p>{language === "zh" ? "你看过的、跳过的，以及真正留下来的。" : "Everything watched, skipped and retained."}</p></div></div>
       <div className="history-layout">
         <article className="content-panel">
-          <div className="section-head border-bottom"><div className="inline-tabs"><button className="active">{language === "zh" ? "全部" : "All"}</button><button>{language === "zh" ? "我看过的" : "Watched"}</button><button>{language === "zh" ? "Mira 跳过的" : "Skipped by Mira"}</button></div><button className="date-button">{language === "zh" ? "最近 30 天" : "Last 30 days"}⌄</button></div>
+          <div className="section-head border-bottom"><div className="inline-tabs"><button className="active">{language === "zh" ? "全部" : "All"}</button><button>{language === "zh" ? "我看过的" : "Watched"}</button><button>{language === "zh" ? "Peek 跳过的" : "Skipped by Peek"}</button></div><button className="date-button">{language === "zh" ? "最近 30 天" : "Last 30 days"}⌄</button></div>
           <div className="history-group"><div className="history-date"><strong>{language === "zh" ? "最近" : "Recent"}</strong><span>{items.length} {language === "zh" ? "条记录" : "records"}</span></div>
             {!items.length && <div className="panel-empty">{copy[language].noItems}</div>}
             {items.map((item) => {
@@ -1046,7 +1050,7 @@ function HistoryView({ language, items, savedTotal, onOpen }: { language: Langua
               return (
                 <div className="history-entry" key={item.id} onClick={() => item.analysisId && onOpen(item.analysisId)}>
                   <span className={`history-dot ${resultClass === "keep" ? "keep-dot" : "skip-dot"}`} />
-                  <div><span className="meta">{item.source} · {item.result ? `Mira ${language === "zh" ? "已看完" : "previewed"}` : item.status || "等待分析"}</span><h3>{item.title}</h3><p>{item.result?.summary || `${Number(item.noteCount || 0)} 条笔记`}</p></div>
+                  <div><span className="meta">{item.source} · {item.result ? `Peek ${language === "zh" ? "已看完" : "previewed"}` : item.status || "等待分析"}</span><h3>{item.title}</h3><p>{item.result?.summary || `${Number(item.noteCount || 0)} 条笔记`}</p></div>
                   <b className={`history-result ${resultClass}`}>{item.result ? verdictLabel(item.result.verdict, language) : language === "zh" ? "处理中" : "Processing"}</b>
                   <time>{new Date(item.createdAt).toLocaleDateString(language === "zh" ? "zh-CN" : "en-US", { month: "numeric", day: "numeric" })}</time>
                 </div>
@@ -1054,7 +1058,7 @@ function HistoryView({ language, items, savedTotal, onOpen }: { language: Langua
             })}
           </div>
         </article>
-        <aside className="history-stats"><article><span>{language === "zh" ? "累计省下" : "Time saved"}</span><strong>{formatTime(savedTotal)}</strong><small>{language === "zh" ? "来自真实分析结果" : "From real analyses"}</small></article><article><span>{language === "zh" ? "真正看完" : "Completed"}</span><strong>{items.filter((item) => item.state === "completed").length} {language === "zh" ? "场" : ""}</strong><small>{language === "zh" ? "聚焦高价值片段" : "Focused viewing"}</small></article><article className="mascot-tip"><img src="/mascot-v2.png" alt="" /><div><strong>{language === "zh" ? "内容偏好" : "Content preference"}</strong><p>{items.length ? (language === "zh" ? "继续分析更多视频后，Mira 才会从真实记录中总结偏好。" : "Mira will summarize preferences after more real analyses.") : (language === "zh" ? "还没有足够数据形成偏好判断。" : "Not enough data to infer a preference yet.")}</p></div></article></aside>
+        <aside className="history-stats"><article><span>{language === "zh" ? "累计省下" : "Time saved"}</span><strong>{formatTime(savedTotal)}</strong><small>{language === "zh" ? "来自真实分析结果" : "From real analyses"}</small></article><article><span>{language === "zh" ? "真正看完" : "Completed"}</span><strong>{items.filter((item) => item.state === "completed").length} {language === "zh" ? "场" : ""}</strong><small>{language === "zh" ? "聚焦高价值片段" : "Focused viewing"}</small></article><article className="mascot-tip"><img src="/mascot-v2.png" alt="" /><div><strong>{language === "zh" ? "内容偏好" : "Content preference"}</strong><p>{items.length ? (language === "zh" ? "继续分析更多视频后，Peek 才会从真实记录中总结偏好。" : "Peek will summarize preferences after more real analyses.") : (language === "zh" ? "还没有足够数据形成偏好判断。" : "Not enough data to infer a preference yet.")}</p></div></article></aside>
       </div>
     </section>
   );
@@ -1229,7 +1233,7 @@ function SettingsView({
 
       <article className="settings-panel settings-footnote">
         <div><span className="eyebrow">PRIVACY</span><h2>{language === "zh" ? "匿名免登录" : "Anonymous, no sign-in"}</h2></div>
-        <p>{language === "zh" ? "当前空间通过 HttpOnly 会话 Cookie 隔离。未读先知不保存原媒体或原文副本；分析后只保留结构化结果和你主动写下的笔记。" : "This workspace is isolated by an HttpOnly session cookie. Source media and text copies are not stored; only structured results and notes are retained."}</p>
+        <p>{language === "zh" ? "当前空间通过 HttpOnly 会话 Cookie 隔离。先鉴 Peek 不保存原媒体或原文副本；分析后只保留结构化结果和你主动写下的笔记。" : "This workspace is isolated by an HttpOnly session cookie. Source media and text copies are not stored; only structured results and notes are retained."}</p>
       </article>
     </section>
   );
@@ -1239,7 +1243,7 @@ function ProgressView({ language, analysis, onBack, onRetry }: { language: Langu
   const stopped = ["failed", "cancelled"].includes(analysis.status);
   const contentLabel = contentTypeLabel(analysis.contentType, language);
   return (
-    <section className="page centered-page"><article className="progress-card"><div className={`agent-orb ${stopped ? "stopped" : ""}`}><img src="/mascot-v2.png" alt="" />{!stopped && <i />}</div><span className="eyebrow">REAL AGENT TASK</span><h1>{stopped ? (language === "zh" ? "这次没有完成" : "This task did not finish") : (language === "zh" ? "Mira 正在替你先读" : "Mira is reviewing it")}</h1><p>{analysis.progressText}</p><div className="task-facts"><div><span>{contentLabel}</span><strong>{analysis.title}</strong></div><div><span>{language === "zh" ? "任务状态" : "Status"}</span><strong>{analysis.status}</strong></div><div><span>taskId</span><code>{analysis.taskId || (language === "zh" ? "等待 InfiniSynapse 返回…" : "Waiting for InfiniSynapse…")}</code></div></div>{analysis.errorMessage && <div className="error-box">{analysis.errorMessage}</div>}<div className="button-row">{analysis.id && stopped && <button className="primary-button" onClick={onRetry}>{language === "zh" ? "尝试恢复" : "Recover"}</button>}<button className="secondary-button" onClick={onBack}>{language === "zh" ? "返回" : "Back"}</button></div><small>{language === "zh" ? "刷新不会丢失 taskId；任务可从历史记录继续恢复。" : "Refresh-safe: the task can be recovered from History."}</small></article></section>
+    <section className="page centered-page"><article className="progress-card"><div className={`agent-orb ${stopped ? "stopped" : ""}`}><img src="/mascot-v2.png" alt="" />{!stopped && <i />}</div><span className="eyebrow">REAL AGENT TASK</span><h1>{stopped ? (language === "zh" ? "这次没有完成" : "This task did not finish") : (language === "zh" ? "Peek 正在替你先读" : "Peek is reviewing it")}</h1><p>{analysis.progressText}</p><div className="task-facts"><div><span>{contentLabel}</span><strong>{analysis.title}</strong></div><div><span>{language === "zh" ? "任务状态" : "Status"}</span><strong>{analysis.status}</strong></div><div><span>taskId</span><code>{analysis.taskId || (language === "zh" ? "等待 InfiniSynapse 返回…" : "Waiting for InfiniSynapse…")}</code></div></div>{analysis.errorMessage && <div className="error-box">{analysis.errorMessage}</div>}<div className="button-row">{analysis.id && stopped && <button className="primary-button" onClick={onRetry}>{language === "zh" ? "尝试恢复" : "Recover"}</button>}<button className="secondary-button" onClick={onBack}>{language === "zh" ? "返回" : "Back"}</button></div><small>{language === "zh" ? "刷新不会丢失 taskId；任务可从历史记录继续恢复。" : "Refresh-safe: the task can be recovered from History."}</small></article></section>
   );
 }
 
@@ -1279,7 +1283,7 @@ function DetailView({ language, analysis, onBack, onState, onNoteSaved }: { lang
   return (
     <section className="page page-view">
       <div className="detail-top"><button className="back-button" onClick={onBack}>← {language === "zh" ? "返回" : "Back"}</button><div className="detail-actions">{shelved ? <><button className="secondary-button shelf-confirmed" disabled>✓ {language === "zh" ? "已在书架" : "On shelf"}</button><button className="icon-button" disabled={shelfBusy} onClick={() => changeShelf("archived")} aria-label={language === "zh" ? "移出书架" : "Remove from shelf"} title={language === "zh" ? "移出书架并同步技能树" : "Remove from shelf and sync skill tree"}>−</button></> : <><button className="primary-button" disabled={shelfBusy} onClick={() => changeShelf("shelved")}>＋ {language === "zh" ? "纳入书架" : "Add to shelf"}</button><button className="secondary-button" disabled={shelfBusy} onClick={() => changeShelf("archived")}>{language === "zh" ? "暂不纳入" : "Not now"}</button></>}</div></div>
-      <div className="detail-hero"><div className="detail-cover"><div className="cover-grid" /><span>{analysis.source.split(/[·｜|]/)[0].toUpperCase()}</span><small>PUBLIC {contentLabel.toUpperCase()} · ANALYZED</small>{isVideo ? <i>{timecode(result.totalDurationSeconds)}</i> : <i>{result.segments.length} 节</i>}</div><div className="detail-copy"><span className="meta">{analysis.source}</span><h1>{analysis.title}</h1><p>{result.summary}</p><div className="speaker-row"><span className="speaker-avatar">M</span><div><strong>Mira · InfiniSynapse Agent</strong><small>{language === "zh" ? (isVideo ? "已核验时间码与内容信号" : "已核验原文章节与内容信号") : (isVideo ? "Timestamps and signals verified" : "Sections and content signals verified")}</small></div></div></div><div className="verdict-card"><span className="verdict-label"><i />{language === "zh" ? "Mira 的结论" : "Mira's verdict"}</span><strong>{verdictLabel(result.verdict, language)}</strong><p>{language === "zh" ? (isVideo ? `只看 ${result.segments.filter((segment) => segment.decision === "watch").length} 个片段，共 ${formatTime(result.recommendedSeconds)}。` : `建议优先阅读 ${result.segments.filter((segment) => segment.decision === "watch").length} 个章节。`) : `${result.segments.filter((segment) => segment.decision === "watch").length} recommended sections.`}</p><div><span>{language === "zh" ? "与你的匹配度" : "Match"}</span><b>{result.signals.match}%</b></div></div></div>
+      <div className="detail-hero"><div className="detail-cover"><div className="cover-grid" /><span>{analysis.source.split(/[·｜|]/)[0].toUpperCase()}</span><small>PUBLIC {contentLabel.toUpperCase()} · ANALYZED</small>{isVideo ? <i>{timecode(result.totalDurationSeconds)}</i> : <i>{result.segments.length} 节</i>}</div><div className="detail-copy"><span className="meta">{analysis.source}</span><h1>{analysis.title}</h1><p>{result.summary}</p><div className="speaker-row"><span className="speaker-avatar">P</span><div><strong>Peek · InfiniSynapse Agent</strong><small>{language === "zh" ? (isVideo ? "已核验时间码与内容信号" : "已核验原文章节与内容信号") : (isVideo ? "Timestamps and signals verified" : "Sections and content signals verified")}</small></div></div></div><div className="verdict-card"><span className="verdict-label"><i />{language === "zh" ? "Peek 的结论" : "Peek's verdict"}</span><strong>{verdictLabel(result.verdict, language)}</strong><p>{language === "zh" ? (isVideo ? `只看 ${result.segments.filter((segment) => segment.decision === "watch").length} 个片段，共 ${formatTime(result.recommendedSeconds)}。` : `建议优先阅读 ${result.segments.filter((segment) => segment.decision === "watch").length} 个章节。`) : `${result.segments.filter((segment) => segment.decision === "watch").length} recommended sections.`}</p><div><span>{language === "zh" ? "与你的匹配度" : "Match"}</span><b>{result.signals.match}%</b></div></div></div>
       <div className="detail-body">
         <article className="route-panel"><div className="section-head"><div><span className="eyebrow">{isVideo ? "YOUR WATCHING ROUTE" : "YOUR READING ROUTE"}</span><h2>{language === "zh" ? (isVideo ? "你的观看路线" : "你的阅读路线") : (isVideo ? "Your watching route" : "Your reading route")}</h2><p>{language === "zh" ? (isVideo ? `完整视频 ${formatTime(result.totalDurationSeconds)}，只保留能推动当前项目的部分。` : "按原文章节定位，先读最能推动当前项目的部分。") : (isVideo ? `From ${formatTime(result.totalDurationSeconds)}, only keep what moves your project forward.` : "Jump directly to the sections that move your current project forward.")}</p></div>{isVideo && <div className="time-saved"><span>{language === "zh" ? "预计节省" : "TIME SAVED"}</span><strong>{formatTime(result.savedSeconds)}</strong></div>}</div>
           {isVideo && <div className="video-timeline"><div className="timeline-bar">{result.segments.map((segment) => <i key={segment.id} className={`dynamic-segment ${segment.decision}`} style={{ left: `${(segment.startSeconds / result.totalDurationSeconds) * 100}%`, width: `${Math.max(1, ((segment.endSeconds - segment.startSeconds) / result.totalDurationSeconds) * 100)}%` }} />)}</div><div className="timeline-labels"><span>00:00</span><span>{timecode(result.totalDurationSeconds / 4)}</span><span>{timecode(result.totalDurationSeconds / 2)}</span><span>{timecode(result.totalDurationSeconds * 0.75)}</span><span>{timecode(result.totalDurationSeconds)}</span></div></div>}
@@ -1323,11 +1327,11 @@ function AddMeeting({ language, demo, onClose, onStart, notify }: { language: La
   const typeLabel = contentTypeLabel(contentType, language);
   const sourceHint = contentType === "video"
     ? (language === "zh" ? "支持公开的 YouTube、Bilibili、Vimeo 与其他可访问视频页面；必须有字幕、文字稿或章节时间码。" : "Supports public video pages with captions, transcript or chapters.")
-    : (language === "zh" ? "支持公开可访问的文章、网页与 PDF 论文链接；Mira 会标出可直接回到原文的章节。" : "Use a public article, web page or PDF. Mira returns locatable source sections.");
+    : (language === "zh" ? "支持公开可访问的文章、网页与 PDF 论文链接；Peek 会标出可直接回到原文的章节。" : "Use a public article, web page or PDF. Peek returns locatable source sections.");
   return (
     <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <section className="modal video-link-modal" role="dialog" aria-modal="true" aria-labelledby="add-title">
-        <div className="modal-head"><div><span className="eyebrow">NEW ANALYSIS</span><h2 id="add-title">{language === "zh" ? "提交内容，Mira 替你先读" : "Share content. Mira reviews it first."}</h2><p>{language === "zh" ? "公开视频、文章和论文都可以分析。结果会保留可回到原内容的关键位置。" : "Analyze public videos, articles and papers with links back to key source locations."}</p></div><button className="close-button" onClick={onClose} aria-label="关闭">×</button></div>
+        <div className="modal-head"><div><span className="eyebrow">NEW ANALYSIS</span><h2 id="add-title">{language === "zh" ? "提交内容，Peek 替你先读" : "Share content. Peek reviews it first."}</h2><p>{language === "zh" ? "公开视频、文章和论文都可以分析。结果会保留可回到原内容的关键位置。" : "Analyze public videos, articles and papers with links back to key source locations."}</p></div><button className="close-button" onClick={onClose} aria-label="关闭">×</button></div>
         <div className="link-hero">
           <div className="content-type-control" role="group" aria-label={language === "zh" ? "内容类型" : "Content type"}>{(["video", "article", "paper"] as ContentType[]).map((type) => <button key={type} type="button" className={contentType === type ? "active" : ""} onClick={() => { setContentType(type); setAdvanced(false); }}>{contentTypeLabel(type, language)}</button>)}</div>
           <label><span>{language === "zh" ? `${typeLabel}链接` : `${typeLabel} URL`}</span><div className="url-input-wrap"><span>↗</span><input value={contentUrl} onChange={(event) => setContentUrl(event.target.value)} placeholder={contentType === "video" ? "https://www.youtube.com/watch?v=… / https://www.bilibili.com/video/…" : contentType === "paper" ? "https://arxiv.org/pdf/… / https://example.com/paper.pdf" : "https://example.com/article"} autoFocus /></div><small>{sourceHint}</small></label>

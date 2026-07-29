@@ -1,12 +1,12 @@
 import type { Metadata } from "next";
-import XianjianApp from "./xianjian-app";
+import PeekApp from "./peek-app";
 
 export const metadata: Metadata = {
-  title: "未读先知｜个性化会议价值判断",
+  title: "先鉴 Peek｜先判断值不值得看",
   description:
-    "不必看完整场会议。未读先知会根据你的项目和知识背景，只留下真正值得看的时间码。",
+    "不必看完整场内容。先鉴 Peek 会判断内容含金量和与你的匹配度，只留下真正值得投入的部分。",
 };
 
 export default function Home() {
-  return <XianjianApp />;
+  return <PeekApp />;
 }
