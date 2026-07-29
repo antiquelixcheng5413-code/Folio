@@ -145,6 +145,7 @@ assert.match(client, /titleMode/);
   assert.match(notesAsk, /answerLearningQuestion/);
   assert.match(notesTranslate, /notebook_translations/);
   assert.match(notesTranslate, /translatableItems/);
+  assert.match(notesTranslate, /translationChunks/);
   assert.match(coreReport, /Peek 模型调用与评分核心报告/);
   assert.match(coreReport, /最终匹配度/);
   assert.match(migration, /CREATE TABLE `notebook_translations`/);

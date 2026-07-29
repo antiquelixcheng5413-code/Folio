@@ -8,6 +8,24 @@ type NoteRow = {
   updatedAt: string;
 };
 
+function translationChunks(markdown: string, limit = 1600) {
+  const sections = markdown.split(/(?=^#{1,4}\s+)/m).map((item) => item.trim()).filter(Boolean);
+  const chunks: string[] = [];
+  for (const section of sections.length ? sections : [markdown]) {
+    const previous = chunks[chunks.length - 1];
+    if (previous && previous.length + section.length + 2 <= limit) {
+      chunks[chunks.length - 1] = `${previous}\n\n${section}`;
+    } else if (section.length <= limit) {
+      chunks.push(section);
+    } else {
+      for (let index = 0; index < section.length; index += limit) {
+        chunks.push(section.slice(index, index + limit));
+      }
+    }
+  }
+  return chunks.slice(0, 6);
+}
+
 export async function POST(request: Request) {
   const session = await getSession(request);
   try {
@@ -44,23 +62,26 @@ export async function POST(request: Request) {
   }
   const singleItem = translatableItems.length === 1;
   if (singleItem) {
-    const translation = await answerLearningQuestion({
-      title: "Peek notebook translation",
-      question: "Translate the complete SOURCE_TEXT into natural English Markdown. Preserve every heading, list, emphasis, number, timestamp, name, technical term, piece of evidence, and follow-up question. Do not summarize, explain your plan, or add commentary. Put the full translation in answer.",
+    const chunks = translationChunks(translatableItems[0].content);
+    const translations = await Promise.all(chunks.map((sourceText, index) => answerLearningQuestion({
+      title: `Peek notebook translation ${index + 1}/${chunks.length}`,
+      question: "Translate the complete SOURCE_TEXT chunk into natural English Markdown. Preserve every heading, list, emphasis, number, timestamp, name, technical term, piece of evidence, and follow-up question. Do not summarize, explain your plan, or add commentary. Put only the full translation in answer.",
       language: "en",
       resultJson: "{}",
-      sourceText: translatableItems[0].content,
+      sourceText,
+    })));
+    const translatedChunks = translations.map((translation) => translation.answer.answer.trim());
+    const invalidChunk = translatedChunks.some((content, index) => {
+      const sourceHeadingCount = chunks[index].match(/^#{1,4}\s+.+$/gm)?.length || 0;
+      const translatedHeadingCount = content.match(/^#{1,4}\s+.+$/gm)?.length || 0;
+      return content.length < 40 ||
+        /\b(?:let me|i need to|the user wants|i should|i will)\b/i.test(content) ||
+        (sourceHeadingCount > 0 && translatedHeadingCount < sourceHeadingCount);
     });
-    const content = translation.answer.answer.trim();
-    const sourceHasHeadings = /^#{1,4}\s+/m.test(translatableItems[0].content);
-    const headingCount = content.match(/^#{1,4}\s+.+$/gm)?.length || 0;
-    if (
-      content.length < 40 ||
-      /\b(?:let me|i need to|the user wants|i should|i will)\b/i.test(content) ||
-      (sourceHasHeadings && headingCount < 2)
-    ) {
+    if (invalidChunk) {
       return json({ error: "英文笔记没有完整生成，请重试" }, { status: 502 }, session.cookie);
     }
+    const content = translatedChunks.join("\n\n");
     const translated = sourceItems.map((item) => ({
       id: item.id,
       content: item.id === translatableItems[0].id ? content : item.content,
@@ -70,7 +91,11 @@ export async function POST(request: Request) {
       VALUES (?, ?, ?, ?, ?, ?)`)
       .bind(cacheKey, payload.meetingId, session.sessionId, language, sourceHash, JSON.stringify(translated))
       .run();
-    return json({ items: translated, cached: false, taskId: translation.taskId }, {}, session.cookie);
+    return json({
+      items: translated,
+      cached: false,
+      taskId: translations.map((item) => item.taskId).filter(Boolean).join(","),
+    }, {}, session.cookie);
   }
   const translationInput = singleItem ? translatableItems[0].content : JSON.stringify(translatableItems);
   const task = await runInfiniJsonTask(`你是 Peek 的双语学习笔记编辑。直接完成翻译，不要解释计划、不要复述任务、不要输出思考过程。请将以下中文笔记完整转换为自然、准确的英文学习笔记。
