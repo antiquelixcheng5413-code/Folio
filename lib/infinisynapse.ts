@@ -278,6 +278,29 @@ function parseJsonCandidate(text: string) {
   return null;
 }
 
+function recursiveJsonObjects(
+  value: unknown,
+  output: Record<string, unknown>[] = [],
+  seen = new Set<object>()
+) {
+  if (!value) return output;
+  if (typeof value === "string") {
+    const parsed = parseJsonCandidate(value);
+    if (parsed && parsed !== value) recursiveJsonObjects(parsed, output, seen);
+    return output;
+  }
+  if (typeof value !== "object" || seen.has(value)) return output;
+  seen.add(value);
+  if (Array.isArray(value)) {
+    for (const item of value) recursiveJsonObjects(item, output, seen);
+    return output;
+  }
+  const record = value as Record<string, unknown>;
+  for (const item of Object.values(record)) recursiveJsonObjects(item, output, seen);
+  output.push(record);
+  return output;
+}
+
 function score(value: unknown) {
   const number = Number(value);
   if (!Number.isFinite(number)) return 0;
@@ -861,6 +884,7 @@ export async function runInfiniJsonTask(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort("json task timeout"), 2.5 * 60 * 1000);
   const collected: string[] = [];
+  const collectedValues: unknown[] = [];
   try {
     const streamResponse = await fetch(
       `${baseUrl}/api/ai/events?connId=${encodeURIComponent(connId)}`,
@@ -891,6 +915,7 @@ export async function runInfiniJsonTask(
         if (!dataText || dataText === "[DONE]") continue;
         const payload = parseJsonCandidate(dataText) || dataText;
         taskId ||= recursiveTaskId(payload) || "";
+        collectedValues.push(payload);
         collected.push(...recursiveTexts(payload));
         const serialized = typeof payload === "string" ? payload : JSON.stringify(payload);
         if (serialized.includes("completion_result")) completed = true;
@@ -898,7 +923,15 @@ export async function runInfiniJsonTask(
     }
     if (taskId) {
       const messages = await apiJson<unknown>(`/api/ai_task/getUiMessageById?id=${encodeURIComponent(taskId)}`).catch(() => null);
+      collectedValues.push(messages);
       collected.push(...recursiveTexts(messages));
+    }
+    const objects = [
+      ...collectedValues.slice().reverse().flatMap((value) => recursiveJsonObjects(value)),
+      ...collected.slice().reverse().flatMap((candidate) => recursiveJsonObjects(candidate)),
+    ];
+    for (const parsed of objects) {
+      if (accept(parsed)) return { taskId, result: parsed };
     }
     for (const candidate of collected.reverse()) {
       const parsed = parseJsonCandidate(candidate);

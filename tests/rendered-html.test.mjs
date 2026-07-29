@@ -125,6 +125,7 @@ assert.match(client, /titleMode/);
   assert.match(prompt, /skillAssessment/);
   assert.match(prompt, /peek\.skill\.v2/);
   assert.match(prompt, /2-20 字的规范名词短语/);
+  assert.match(prompt, /recursiveJsonObjects/);
   assert.match(client, /类别 → 专业领域 → 知识与技能点/);
   assert.match(taxonomy, /豪斯多夫维数/);
   assert.match(taxonomy, /extractLegacySkillPoints/);
