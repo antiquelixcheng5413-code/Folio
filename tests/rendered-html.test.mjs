@@ -34,6 +34,7 @@ test("build contains the Peek product and deployable worker", async () => {
   assert.match(client, /精华内容/);
   assert.match(client, /内容含金量/);
   assert.match(client, /纳入书架并更新技能树/);
+  assert.match(client, /shelfTopics/);
   assert.match(client, /访客/);
   assert.match(client, /已同步学习空间/);
   assert.match(client, /由纳入书架的内容自动累计/);

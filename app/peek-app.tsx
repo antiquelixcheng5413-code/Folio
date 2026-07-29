@@ -1401,6 +1401,10 @@ function DetailView({ language, analysis, onBack, onState, onNoteSaved }: { lang
   const shelved = isOnShelf(analysis.meetingState);
   const isVideo = analysis.contentType === "video";
   const contentLabel = contentTypeLabel(analysis.contentType, language);
+  const shelfTopics = (result.skillAssessment?.skills || [])
+    .map((skill) => skill.name)
+    .filter(Boolean)
+    .slice(0, 6);
   const changeShelf = async (state: string) => {
     setShelfBusy(true);
     try { await onState(state); }
@@ -1451,7 +1455,7 @@ function DetailView({ language, analysis, onBack, onState, onNoteSaved }: { lang
             <div className="score-block match-score"><div><span className="score-label">{language === "zh" ? "与你的匹配度" : "Your match"}<InfoTip label={language === "zh" ? "匹配度说明" : "About this score"}>{matchExplanation}</InfoTip></span><em>{scoreBand(result.signals.match, language)}</em></div><strong>{result.signals.match}<small>%</small></strong><p>{matchReason}</p><i><b style={{ width: `${result.signals.match}%` }} /></i></div>
             <div className="score-block value-score"><div><span>{language === "zh" ? "内容含金量" : "Content value"}</span><em>{scoreBand(valueScore, language)}</em></div><strong>{valueScore}<small>%</small></strong><p>{valueReason}</p><i><b style={{ width: `${valueScore}%` }} /></i></div><div className="score-details">{[[language === "zh" ? "专业深度" : "Depth", result.signals.depth], [language === "zh" ? "来源可信" : "Reliability", result.signals.sourceReliability], [language === "zh" ? "推广占比" : "Promotion", result.signals.promotion]].map(([label, value]) => <div key={String(label)}><span>{label}</span><b>{value}%</b></div>)}</div>
           </article>
-          <article className={`shelf-decision-card ${shelved ? "is-shelved" : ""}`}><div className="memory-title"><img src="/mascot-v2.png" alt="" /><div><strong>{shelved ? (language === "zh" ? "已同步到技能树" : "Skill tree updated") : (language === "zh" ? "是否值得进入你的知识体系？" : "Add this to your knowledge system?")}</strong><p>{shelved ? (language === "zh" ? "移出书架时会同步撤回" : "Removing it also reverts the update") : (language === "zh" ? "由你确认，不会自动替你做决定" : "You decide; nothing is added automatically")}</p></div></div><span>{result.newKnowledge.map((item) => item.topic).join(" / ") || (language === "zh" ? "暂无新增技能节点" : "No new skill nodes")}</span>{!shelved && <button className="primary-button" disabled={shelfBusy} onClick={() => changeShelf("shelved")}>{language === "zh" ? "纳入书架并更新技能树" : "Add to shelf and update skill tree"}</button>}</article>
+          <article className={`shelf-decision-card ${shelved ? "is-shelved" : ""}`}><div className="memory-title"><img src="/mascot-v2.png" alt="" /><div><strong>{shelved ? (language === "zh" ? "已同步到技能树" : "Skill tree updated") : (language === "zh" ? "是否值得进入你的知识体系？" : "Add this to your knowledge system?")}</strong><p>{shelved ? (language === "zh" ? "移出书架时会同步撤回" : "Removing it also reverts the update") : (language === "zh" ? "由你确认，不会自动替你做决定" : "You decide; nothing is added automatically")}</p></div></div><span>{shelfTopics.length ? shelfTopics.join(" · ") : (language === "zh" ? "纳入后会根据内容整理知识点" : "Knowledge points will be organized after adding")}</span>{!shelved && <button className="primary-button" disabled={shelfBusy} onClick={() => changeShelf("shelved")}>{language === "zh" ? "纳入书架并更新技能树" : "Add to shelf and update skill tree"}</button>}</article>
         </aside>
       </div>
     </section>
