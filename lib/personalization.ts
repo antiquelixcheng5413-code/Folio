@@ -149,6 +149,7 @@ export function recalculatePersonalMatch(
     formulaVersion: "peek.match.v2",
     profileFingerprint: fingerprint,
     evaluatedAt: new Date().toISOString(),
+    relevance,
     skillFit,
     knowledgeGain,
     difficultyFit,

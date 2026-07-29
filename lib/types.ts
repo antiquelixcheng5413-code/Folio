@@ -56,6 +56,7 @@ export interface PersonalizationScore {
   formulaVersion: "peek.match.v2";
   profileFingerprint: string;
   evaluatedAt: string;
+  relevance: number;
   skillFit: number;
   knowledgeGain: number;
   difficultyFit: number;

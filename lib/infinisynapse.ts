@@ -488,6 +488,7 @@ export function normalizeResult(
             formulaVersion: "peek.match.v2" as const,
             profileFingerprint: String(rawPersonalization.profileFingerprint || ""),
             evaluatedAt: String(rawPersonalization.evaluatedAt || ""),
+            relevance: score(rawPersonalization.relevance),
             skillFit: score(rawPersonalization.skillFit),
             knowledgeGain: score(rawPersonalization.knowledgeGain),
             difficultyFit: score(rawPersonalization.difficultyFit),

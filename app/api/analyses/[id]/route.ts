@@ -246,7 +246,8 @@ export async function GET(
       current.personalization?.profileFingerprint !==
       personalized.personalization?.profileFingerprint;
     const scoreChanged = current.signals.match !== personalized.signals.match;
-    if (fingerprintChanged || scoreChanged) {
+    const formulaShapeChanged = !Number.isFinite(current.personalization?.relevance);
+    if (fingerprintChanged || scoreChanged || formulaShapeChanged) {
       row.resultJson = JSON.stringify(personalized);
       await db
         .prepare(`UPDATE analyses SET result_json = ?, updated_at = CURRENT_TIMESTAMP
