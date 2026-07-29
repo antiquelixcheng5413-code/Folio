@@ -61,10 +61,14 @@ ${JSON.stringify(translatableItems).slice(0, 60000)}
             .replace(/^```(?:markdown|md)?\s*/i, "")
             .replace(/```\s*$/i, "")
             .trim();
+          const sourceHasHeadings = /^#{1,4}\s+/m.test(translatableItems[0].content);
+          const headingCount = content.match(/^#{1,4}\s+.+$/gm)?.length || 0;
           if (
             content.length < 40 ||
             content.startsWith("{") ||
-            /completion_result|taskId|connId|NOTE_ITEMS/i.test(content)
+            /completion_result|taskId|connId|NOTE_ITEMS/i.test(content) ||
+            /\b(?:let me|i need to|the user wants|i should|i will)\b/i.test(content) ||
+            (sourceHasHeadings && headingCount < 2)
           ) return null;
           return { items: [{ id: translatableItems[0].id, content }] };
         }
