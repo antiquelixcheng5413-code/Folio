@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ContentType, LearningProfile, XianjianAnalysisResult } from "../lib/types";
-import { ConnectInfiniModal } from "./connect-infini-modal";
+import { ConnectInfiniModal, type AuthStatus } from "./connect-infini-modal";
 
 type View = "home" | "tasks" | "later" | "history" | "notes" | "skills" | "settings" | "progress" | "detail";
 type Language = "zh" | "en";
@@ -276,7 +276,11 @@ export default function PeekApp() {
   const [taskListOpen, setTaskListOpen] = useState(false);
   const [toast, setToast] = useState("");
   const [loading, setLoading] = useState(true);
-  const [canRestore, setCanRestore] = useState(false);
+  const [authStatus, setAuthStatus] = useState<AuthStatus>({
+    configured: false,
+    authenticated: false,
+    user: null,
+  });
   const restoredOnLoad = useRef(false);
   const analysisRequestVersion = useRef(0);
   const t = copy[language];
@@ -316,9 +320,9 @@ export default function PeekApp() {
       api<{ items: NoteItem[] }>("/api/library?view=notes"),
       api<{ settings: WorkspaceSettings }>("/api/settings"),
       api<{ items: DiscoveryItem[] }>("/api/discoveries"),
-      api<{ canRestore: boolean }>("/api/session/status"),
+      api<AuthStatus>("/api/auth/status"),
     ])
-      .then(([demoPayload, meetingPayload, knowledgePayload, notesPayload, settingsPayload, discoveryPayload, sessionPayload]) => {
+      .then(([demoPayload, meetingPayload, knowledgePayload, notesPayload, settingsPayload, discoveryPayload, accountPayload]) => {
         const loadedMeetings = meetingPayload.items || [];
         setDemo(demoPayload);
         setMeetings(loadedMeetings);
@@ -326,7 +330,16 @@ export default function PeekApp() {
         setNotes(notesPayload.items || []);
         setWorkspaceSettings(settingsPayload.settings);
         setDiscoveries(discoveryPayload.items || []);
-        setCanRestore(sessionPayload.canRestore);
+        setAuthStatus(accountPayload);
+        const authResult = new URL(window.location.href).searchParams.get("auth");
+        if (authResult === "success") notify(language === "zh" ? "登录成功，学习空间已同步" : "Signed in. Your workspace is synced.");
+        if (authResult === "error") notify(new URL(window.location.href).searchParams.get("reason") || (language === "zh" ? "登录失败，请重试" : "Sign-in failed."));
+        if (authResult) {
+          const cleanUrl = new URL(window.location.href);
+          cleanUrl.searchParams.delete("auth");
+          cleanUrl.searchParams.delete("reason");
+          window.history.replaceState({}, "", `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`);
+        }
         const requestedAnalysisId = new URL(window.location.href).searchParams.get("analysis");
         const activeItems = loadedMeetings.filter((item) => isAnalysisActive(item.status));
         if (requestedAnalysisId) {
@@ -711,7 +724,7 @@ export default function PeekApp() {
                 </div>
               )}
             </div>
-            <button className="infini-connect" onClick={() => setShowConnect(true)} title={language === "zh" ? "连接 InfiniSynapse" : "Connect InfiniSynapse"}><span>◌</span><b>{language === "zh" ? "连接 InfiniSynapse" : "Connect InfiniSynapse"}</b></button>
+            <button className="infini-connect" onClick={() => setShowConnect(true)} title={authStatus.authenticated ? (language === "zh" ? "管理账号" : "Manage account") : (language === "zh" ? "登录或以访客使用" : "Sign in or continue as guest")}><span>◌</span><b>{authStatus.authenticated ? (authStatus.user?.nickname || authStatus.user?.email || (language === "zh" ? "已登录" : "Signed in")) : (language === "zh" ? "登录" : "Sign in")}</b></button>
             <button className="primary-button add-content-button" onClick={() => { setShowAdd(true); setTaskListOpen(false); notify(language === "zh" ? "已打开内容分析窗口" : "Analysis form opened"); }}>＋ {t.add}</button>
           </div>
         </header>
@@ -769,19 +782,12 @@ export default function PeekApp() {
             autoDiscoverVideos={workspaceSettings.autoDiscoverVideos}
             autoAnalyzeDiscoveries={workspaceSettings.autoAnalyzeDiscoveries}
             titleMode={workspaceSettings.titleMode}
-            canRestore={canRestore}
+            authStatus={authStatus}
             onAutoCreateNoteChange={updateAutoCreateNote}
             onTitleModeChange={updateTitleMode}
             onDiscoverySettingsChange={updateDiscoverySettings}
             onDiscoverNow={discoverNow}
-            onBlank={async () => {
-              await api("/api/session/blank", { method: "POST" });
-              window.location.assign("/");
-            }}
-            onRestore={async () => {
-              await api("/api/session/restore", { method: "POST" });
-              window.location.assign("/");
-            }}
+            onManageAccount={() => setShowConnect(true)}
           />
         )}
         {(view === "progress" || (view === "detail" && !analysis?.result)) && analysis && (
@@ -804,7 +810,14 @@ export default function PeekApp() {
       {showAdd && (
         <AddMeeting language={language} demo={demo} onClose={() => setShowAdd(false)} onStart={startAnalysis} notify={notify} />
       )}
-      {showConnect && <ConnectInfiniModal language={language} onClose={() => setShowConnect(false)} />}
+      {showConnect && (
+        <ConnectInfiniModal
+          language={language}
+          status={authStatus}
+          onClose={() => setShowConnect(false)}
+          onChanged={async () => setAuthStatus(await api<AuthStatus>("/api/auth/status"))}
+        />
+      )}
       <div className={`toast ${toast ? "show" : ""}`}>{toast}</div>
     </div>
   );
@@ -1110,13 +1123,12 @@ function SettingsView({
   autoDiscoverVideos,
   autoAnalyzeDiscoveries,
   titleMode,
-  canRestore,
+  authStatus,
   onAutoCreateNoteChange,
   onTitleModeChange,
   onDiscoverySettingsChange,
   onDiscoverNow,
-  onBlank,
-  onRestore,
+  onManageAccount,
 }: {
   language: Language;
   knowledgeCount: number;
@@ -1124,30 +1136,18 @@ function SettingsView({
   autoDiscoverVideos: boolean;
   autoAnalyzeDiscoveries: boolean;
   titleMode: WorkspaceSettings["titleMode"];
-  canRestore: boolean;
+  authStatus: AuthStatus;
   onAutoCreateNoteChange: (autoCreateNote: boolean) => Promise<void>;
   onTitleModeChange: (titleMode: WorkspaceSettings["titleMode"]) => Promise<void>;
   onDiscoverySettingsChange: (next: Partial<Pick<WorkspaceSettings, "autoDiscoverVideos" | "autoAnalyzeDiscoveries">>) => Promise<void>;
   onDiscoverNow: () => Promise<void>;
-  onBlank: () => Promise<void>;
-  onRestore: () => Promise<void>;
+  onManageAccount: () => void;
 }) {
-  const [busy, setBusy] = useState(false);
   const [noteBusy, setNoteBusy] = useState(false);
   const [titleBusy, setTitleBusy] = useState(false);
   const [discoveryBusy, setDiscoveryBusy] = useState(false);
   const [error, setError] = useState("");
-  const run = async (action: () => Promise<void>) => {
-    setBusy(true);
-    setError("");
-    try {
-      await action();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : (language === "zh" ? "切换失败，请稍后重试。" : "Switch failed. Please try again."));
-    } finally {
-      setBusy(false);
-    }
-  };
+  const accountName = authStatus.user?.nickname || authStatus.user?.email || authStatus.user?.username;
 
   return (
     <section className="page page-view settings-page">
@@ -1155,14 +1155,15 @@ function SettingsView({
         <div>
           <span className="eyebrow">WORKSPACE SETTINGS</span>
           <h1>{copy[language].settings}</h1>
-          <p>{language === "zh" ? "管理你的匿名学习空间，并核验哪些内容来自真实使用。" : "Manage your anonymous workspace and verify which content comes from real use."}</p>
+          <p>{language === "zh" ? "管理学习空间、账号同步和内容偏好。" : "Manage your workspace, account sync and content preferences."}</p>
         </div>
       </div>
 
       <div className="settings-grid">
         <article className="settings-panel account-settings-panel">
-          <div className="settings-panel-head"><span className="settings-icon">匿</span><div><h2>{language === "zh" ? "个人信息" : "Personal information"}</h2><p>{language === "zh" ? "当前以匿名身份使用，个人入口与空间设置统一放在这里。" : "You are using an anonymous identity. Personal and workspace settings live here."}</p></div></div>
-          <div className="account-settings-list"><div><span>{language === "zh" ? "使用身份" : "Identity"}</span><strong>{language === "zh" ? "匿名用户" : "Anonymous user"}</strong></div><div><span>{language === "zh" ? "学习画像" : "Learning profile"}</span><strong>{language === "zh" ? `${knowledgeCount} 个知识节点` : `${knowledgeCount} knowledge nodes`}</strong></div><div><span>{language === "zh" ? "画像来源" : "Profile source"}</span><strong>{language === "zh" ? "由纳入书架的内容自动累计" : "Built automatically from shelved content"}</strong></div></div>
+          <div className="settings-panel-head"><span className="settings-icon">{authStatus.authenticated ? "✓" : "匿"}</span><div><h2>{language === "zh" ? "账号与个人信息" : "Account & personal information"}</h2><p>{authStatus.authenticated ? (language === "zh" ? "学习空间已绑定，可在其他设备登录后恢复。" : "Your workspace is linked and can be restored on other devices.") : (language === "zh" ? "当前以访客身份使用；登录完全可选。" : "You are using guest mode. Sign-in is completely optional.")}</p></div></div>
+          <div className="account-settings-list"><div><span>{language === "zh" ? "使用身份" : "Identity"}</span><strong>{accountName || (language === "zh" ? "访客" : "Guest")}</strong></div><div><span>{language === "zh" ? "学习画像" : "Learning profile"}</span><strong>{language === "zh" ? `${knowledgeCount} 个知识节点` : `${knowledgeCount} knowledge nodes`}</strong></div><div><span>{language === "zh" ? "画像来源" : "Profile source"}</span><strong>{language === "zh" ? "由纳入书架的内容自动累计" : "Built automatically from shelved content"}</strong></div></div>
+          <button className="outline-button account-manage-button" onClick={onManageAccount}>{authStatus.authenticated ? (language === "zh" ? "管理账号" : "Manage account") : (language === "zh" ? "登录并同步" : "Sign in & sync")}</button>
         </article>
 
         <article className="settings-panel">
@@ -1207,33 +1208,11 @@ function SettingsView({
           </div>
         </article>
 
-        <article className="settings-panel verification-panel">
-          <div className="settings-panel-head"><span className="settings-icon">□</span><div><h2>{language === "zh" ? "空白核验空间" : "Blank verification workspace"}</h2><p>{language === "zh" ? "从零走一遍流程，同时保留你现在的空间。" : "Walk through the product from zero without losing your current workspace."}</p></div></div>
-          <ol className="verification-steps">
-            <li><span>1</span><p>{language === "zh" ? "进入空白空间，确认首页与各列表没有写死数据。" : "Enter a blank workspace and verify that lists contain no hardcoded records."}</p></li>
-            <li><span>2</span><p>{language === "zh" ? "点击“添加内容”，选择视频、文章或论文并粘贴公开链接。" : "Choose Add content, select its type and paste a public URL."}</p></li>
-            <li><span>3</span><p>{language === "zh" ? "完成真实分析后，核验 taskId、历史记录、技能更新与笔记。" : "After analysis, verify the taskId, History, skill updates and notes."}</p></li>
-          </ol>
-          <div className="workspace-action">
-            {error && <div className="settings-error">{error}</div>}
-            {canRestore ? (
-              <>
-                <div className="mode-badge"><i />{language === "zh" ? "当前正在空白核验空间" : "Currently in blank verification workspace"}</div>
-                <button className="primary-button" disabled={busy} onClick={() => run(onRestore)}>{language === "zh" ? "恢复原有空间" : "Restore original workspace"}</button>
-              </>
-            ) : (
-              <>
-                <p>{language === "zh" ? "这不会删除当前数据。浏览器会保存原空间入口，稍后可一键恢复。" : "This does not delete current data. Your browser keeps a one-click route back."}</p>
-                <button className="primary-button" disabled={busy} onClick={() => run(onBlank)}>{language === "zh" ? "进入空白核验空间" : "Enter blank workspace"}</button>
-              </>
-            )}
-          </div>
-        </article>
       </div>
 
       <article className="settings-panel settings-footnote">
-        <div><span className="eyebrow">PRIVACY</span><h2>{language === "zh" ? "匿名免登录" : "Anonymous, no sign-in"}</h2></div>
-        <p>{language === "zh" ? "当前空间通过 HttpOnly 会话 Cookie 隔离。先鉴 Peek 不保存原媒体或原文副本；分析后只保留结构化结果和你主动写下的笔记。" : "This workspace is isolated by an HttpOnly session cookie. Source media and text copies are not stored; only structured results and notes are retained."}</p>
+        <div><span className="eyebrow">PRIVACY</span><h2>{language === "zh" ? "访客可用，登录可选" : "Guest-ready, optional sign-in"}</h2></div>
+        <p>{language === "zh" ? "访客空间通过 HttpOnly 会话 Cookie 隔离；登录密码只在 InfiniSynapse 官方页面输入。先鉴 Peek 不保存原媒体或原文副本，只保留结构化结果和你主动写下的笔记。" : "Guest spaces are isolated by an HttpOnly session cookie, and credentials are entered only on the official InfiniSynapse page. Peek stores structured results and your notes, not source media copies."}</p>
       </article>
     </section>
   );

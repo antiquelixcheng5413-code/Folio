@@ -20,7 +20,7 @@ test("build contains the Peek product and deployable worker", async () => {
   assert.match(client, /技能树/);
   assert.match(client, /English/);
   assert.match(client, /时间码笔记/);
-  assert.match(client, /空白核验空间/);
+  assert.doesNotMatch(client, /空白核验空间/);
   assert.match(client, /真实并持久化/);
   assert.match(client, /settings-trigger/);
   assert.match(client, /书架/);
@@ -29,7 +29,7 @@ test("build contains the Peek product and deployable worker", async () => {
   assert.match(client, /精华内容/);
   assert.match(client, /内容含金量/);
   assert.match(client, /纳入书架并更新技能树/);
-  assert.match(client, /匿名用户/);
+  assert.match(client, /访客/);
   assert.match(client, /个人信息与设置/);
   assert.match(client, /由纳入书架的内容自动累计/);
   assert.match(client, /每次分析自动生成笔记/);
@@ -41,7 +41,8 @@ assert.match(client, /contentLocatorUrl/);
 assert.match(client, /自动生成内容标题/);
 assert.match(client, /沿用当前方式/);
 assert.match(client, /titleMode/);
-  assert.match(client, /连接 InfiniSynapse/);
+  assert.match(client, /登录或以访客使用/);
+  assert.match(client, /登录并同步/);
   assert.match(client, /自动发现候选视频/);
   assert.match(client, /发现后自动分析/);
   assert.match(client, /每天最多 1 条/);

@@ -12,10 +12,22 @@ InfiniSynapse Agent，获得“值得看 / 选择性看 / 可以跳过”的判�
 
 ## 数据边界
 
-- 匿名会话、画像、结果、笔记和知识更新保存到 D1。
+- 访客会话、画像、结果、笔记和知识更新保存到 D1。
+- 登录完全可选；登录后通过 InfiniSynapse 唯一用户 ID 绑定学习空间。
 - 不保存视频。
 - 字幕在分析成功后立即清理。
-- 每个匿名会话每天最多发起 3 次真实分析。
+- 每个会话每天最多发起 3 次真实分析。
+
+## 可选登录
+
+Peek 使用 InfiniSynapse 官方 Partner SSO，用户可在官方页面通过邮箱、手机号或
+扫码登录；Peek 不接触或保存密码。未配置 SSO 时，访客模式仍可完整使用。
+
+1. 在 InfiniSynapse「设置 → 第三方接入」创建应用。
+2. 回调域名白名单填写生产域名，例如 `peek.antiquelixcheng5413.workers.dev`。
+3. 将 `INFINI_CLIENT_ID` 和 `INFINI_CLIENT_SECRET` 配置为服务端环境变量/Secret。
+4. 回调地址由应用自动生成为
+   `https://你的域名/api/auth/infini/callback`，不要把 `clientSecret` 写入仓库。
 
 ## 真实任务链
 

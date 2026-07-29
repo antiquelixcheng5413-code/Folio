@@ -96,3 +96,15 @@ export const discoveryCandidates = sqliteTable("discovery_candidates", {
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
+
+export const authUsers = sqliteTable("auth_users", {
+  infiniUserId: text("infini_user_id").primaryKey(),
+  sessionId: text("session_id").notNull().unique(),
+  email: text("email"),
+  username: text("username"),
+  nickname: text("nickname"),
+  avatar: text("avatar"),
+  phone: text("phone"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});

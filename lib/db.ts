@@ -109,12 +109,24 @@ export async function ensureSchema() {
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
       )`),
+      db.prepare(`CREATE TABLE IF NOT EXISTS auth_users (
+        infini_user_id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL UNIQUE,
+        email TEXT,
+        username TEXT,
+        nickname TEXT,
+        avatar TEXT,
+        phone TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )`),
       db.prepare("CREATE INDEX IF NOT EXISTS meetings_session_idx ON meetings(session_id, created_at DESC)"),
       db.prepare("CREATE INDEX IF NOT EXISTS analyses_session_idx ON analyses(session_id, created_at DESC)"),
       db.prepare("CREATE INDEX IF NOT EXISTS analyses_input_idx ON analyses(session_id, input_hash)"),
       db.prepare("CREATE INDEX IF NOT EXISTS notes_session_idx ON notes(session_id, created_at DESC)"),
       db.prepare("CREATE INDEX IF NOT EXISTS knowledge_session_idx ON knowledge_items(session_id, created_at DESC)"),
       db.prepare("CREATE INDEX IF NOT EXISTS discovery_session_idx ON discovery_candidates(session_id, created_at DESC)"),
+      db.prepare("CREATE INDEX IF NOT EXISTS auth_users_session_idx ON auth_users(session_id)"),
     ]);
     try {
       await db.prepare("ALTER TABLE meetings ADD COLUMN video_url TEXT").run();
