@@ -1,5 +1,6 @@
 import { getD1, getSession, json } from "../../../../lib/db";
 import { skillKey } from "../../../../lib/personalization";
+import { inferSkillTaxonomy } from "../../../../lib/skill-taxonomy";
 import type { XianjianAnalysisResult } from "../../../../lib/types";
 
 const STATES = new Set(["pending", "archived", "shelved", "later", "completed", "skipped"]);
@@ -63,6 +64,7 @@ export async function PATCH(
             status: item.relation,
             evidence: item.evidence.join("；") || item.description,
             key: item.key || skillKey(item.domain, item.name),
+            category: item.category,
             domain: item.domain,
             skillType: item.type,
             description: item.description,
@@ -77,12 +79,15 @@ export async function PATCH(
       : [
           ...(result.newKnowledge || []).map((item) => ({ ...item, status: "new" })),
           ...(result.repeatedKnowledge || []).map((item) => ({ ...item, status: "reinforce" })),
-        ].map((item) => ({
+        ].map((item) => {
+          const taxonomy = inferSkillTaxonomy(item.topic);
+          return {
           topic: item.topic,
           status: item.status,
           evidence: item.evidence,
           key: skillKey("未分类", item.topic),
-          domain: "未分类",
+          category: taxonomy.category,
+          domain: taxonomy.domain,
           skillType: "concept",
           description: item.evidence,
           prerequisitesJson: "[]",
@@ -91,15 +96,17 @@ export async function PATCH(
           coverage: 50,
           depth: result.signals.depth,
           sourceValue: result.signals.value,
-        }));
+          };
+        });
     for (const item of knowledge) {
       statements.push(
         db
           .prepare(`INSERT INTO knowledge_items
             (id, session_id, meeting_id, analysis_id, topic, status, evidence,
               skill_key, domain, skill_type, description, prerequisites_json,
+              category,
               mastery_level, confidence, coverage, depth, source_value)
-            SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
             WHERE NOT EXISTS (
               SELECT 1 FROM knowledge_items
               WHERE session_id = ? AND analysis_id = ? AND skill_key = ?
@@ -117,6 +124,7 @@ export async function PATCH(
             item.skillType,
             item.description,
             item.prerequisitesJson,
+            item.category,
             item.masteryLevel,
             item.confidence,
             item.coverage,

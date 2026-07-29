@@ -48,6 +48,7 @@ function legacySkills(result: XianjianAnalysisResult): SkillPoint[] {
     index: number
   ): SkillPoint => ({
     key: skillKey("未分类", item.topic) || `legacy-${index}`,
+    category: "未分类",
     domain: "未分类",
     name: item.topic,
     description: item.evidence,

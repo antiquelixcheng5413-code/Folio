@@ -40,7 +40,7 @@ function automaticNoteContent(result: XianjianAnalysisResult) {
   const repeated = result.repeatedKnowledge.slice(0, 4).map((item) => `- ${item.topic}：${item.evidence}`);
   const professionalSkills = (result.skillAssessment?.skills || []).slice(0, 10).map(
     (item) =>
-      `- ${item.domain}／${item.name}（${item.type}）：${item.description}；学完可做到：${item.learningOutcome}；覆盖 ${item.coverage}%，深度 ${item.depth}%`
+      `- ${item.category}／${item.domain}／${item.name}（${item.type}）：${item.description}；学完可做到：${item.learningOutcome}；覆盖 ${item.coverage}%，深度 ${item.depth}%`
   );
   return [
     "# 核心结论",

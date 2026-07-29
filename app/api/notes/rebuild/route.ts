@@ -19,7 +19,7 @@ function structuredNote(result: XianjianAnalysisResult) {
     "## 专业技能点",
     ...((result.skillAssessment?.skills || []).length
       ? result.skillAssessment!.skills.slice(0, 10).map(
-          (item) => `- ${item.domain}／${item.name}：${item.description}；学习结果：${item.learningOutcome}；覆盖 ${item.coverage}%，深度 ${item.depth}%`
+          (item) => `- ${item.category}／${item.domain}／${item.name}：${item.description}；学习结果：${item.learningOutcome}；覆盖 ${item.coverage}%，深度 ${item.depth}%`
         )
       : ["- 旧报告尚未包含专业技能点模型，可重新分析后生成。"]),
     "",

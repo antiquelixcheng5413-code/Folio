@@ -30,6 +30,7 @@ export type SkillType = "concept" | "method" | "tool" | "practice";
 
 export interface SkillPoint {
   key: string;
+  category: string;
   domain: string;
   name: string;
   description: string;
@@ -99,6 +100,7 @@ export interface LearningProfile {
   skills?: Array<{
     key: string;
     name: string;
+    category: string;
     domain: string;
     mastery: number;
     confidence: number;

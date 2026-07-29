@@ -79,6 +79,7 @@ export const knowledgeItems = sqliteTable("knowledge_items", {
   status: text("status").notNull(),
   evidence: text("evidence").notNull().default(""),
   skillKey: text("skill_key").notNull().default(""),
+  category: text("category").notNull().default(""),
   domain: text("domain").notNull().default(""),
   skillType: text("skill_type").notNull().default("concept"),
   description: text("description").notNull().default(""),

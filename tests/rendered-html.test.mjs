@@ -3,7 +3,7 @@ import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("build contains the Peek product and deployable worker", async () => {
-  const [page, layout, client, styles, prompt, personalization, meetingState, analysisRoute] = await Promise.all([
+  const [page, layout, client, styles, prompt, personalization, meetingState, analysisRoute, taxonomy] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/peek-app.tsx", import.meta.url), "utf8"),
@@ -12,6 +12,7 @@ test("build contains the Peek product and deployable worker", async () => {
     readFile(new URL("../lib/personalization.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/meetings/[id]/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/analyses/[id]/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/skill-taxonomy.ts", import.meta.url), "utf8"),
     access(new URL("../dist/server/index.js", import.meta.url)),
     access(new URL("../dist/.openai/hosting.json", import.meta.url)),
   ]);
@@ -86,12 +87,16 @@ assert.match(client, /titleMode/);
   assert.match(client, /setInterval\(\(\) => void loadMeetings\(\), 8_000\)/);
   assert.match(client, /view === "detail" && !analysis\?\.result/);
   assert.match(client, /Peek Match v2/);
-  assert.match(client, /专业技能关系树/);
+  assert.match(client, /知识与技能关系树/);
   assert.match(client, /加入书架只代表接触过/);
   assert.match(prompt, /专业技能点抽取/);
   assert.match(prompt, /人物、奖项、产品名、新闻事实只能作为证据/);
   assert.match(prompt, /skillAssessment/);
   assert.match(prompt, /peek\.skill\.v2/);
+  assert.match(prompt, /2-20 字的规范名词短语/);
+  assert.match(client, /类别 → 专业领域 → 知识与技能点/);
+  assert.match(taxonomy, /豪斯多夫维数/);
+  assert.match(taxonomy, /extractLegacySkillPoints/);
   assert.match(personalization, /0\.15 \+ 0\.85/);
   assert.match(analysisRoute, /k\.meeting_id !=/);
   assert.match(meetingState, /mastery_level/);

@@ -55,13 +55,13 @@ export async function POST(
   }
   const learned = await db
     .prepare(`SELECT k.topic, k.status, k.evidence, k.skill_key AS skillKey,
-      k.domain, k.mastery_level AS mastery, k.confidence
+      k.category, k.domain, k.mastery_level AS mastery, k.confidence
       FROM knowledge_items k JOIN meetings m ON m.id = k.meeting_id
       WHERE k.session_id = ? AND m.state IN ('shelved', 'later', 'completed')
       AND m.id != ?
       ORDER BY k.created_at DESC LIMIT 60`)
     .bind(session.sessionId, meeting.id)
-    .all<{ topic: string; status: string; evidence: string; skillKey: string; domain: string; mastery: number; confidence: number }>();
+    .all<{ topic: string; status: string; evidence: string; skillKey: string; category: string; domain: string; mastery: number; confidence: number }>();
   const learnedTopics = [...new Set(learned.results.map((item) => item.topic).filter(Boolean))];
   const profileSkillMap = new Map<string, NonNullable<LearningProfile["skills"]>[number]>();
   for (const item of learned.results) {
@@ -70,6 +70,7 @@ export async function POST(
     const next = {
       key,
       name: item.topic,
+      category: item.category || "未分类",
       domain: item.domain || "未分类",
       mastery: Math.max(Number(previous?.mastery || 0), Number(item.mastery || 0)),
       confidence: Math.max(Number(previous?.confidence || 0), Number(item.confidence || 0)),

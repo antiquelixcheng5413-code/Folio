@@ -1,4 +1,68 @@
 import { getD1, getSession, json } from "../../../lib/db";
+import { extractLegacySkillPoints } from "../../../lib/skill-taxonomy";
+import type { XianjianAnalysisResult } from "../../../lib/types";
+
+async function repairLegacyKnowledge(db: D1Database, sessionId: string) {
+  const legacy = await db
+    .prepare(`SELECT DISTINCT k.analysis_id AS analysisId, k.meeting_id AS meetingId,
+      a.result_json AS resultJson, m.state
+      FROM knowledge_items k
+      JOIN analyses a ON a.id = k.analysis_id
+      JOIN meetings m ON m.id = k.meeting_id
+      WHERE k.session_id = ? AND (k.skill_key = '' OR k.category = '' OR k.domain = '')
+      AND a.result_json IS NOT NULL
+      LIMIT 20`)
+    .bind(sessionId)
+    .all<{ analysisId: string; meetingId: string; resultJson: string; state: string }>();
+  for (const row of legacy.results) {
+    const result = JSON.parse(row.resultJson) as XianjianAnalysisResult;
+    const skills = extractLegacySkillPoints(result);
+    if (!skills.length) continue;
+    const engagement = row.state === "completed" ? 0.45 : 0.18;
+    const statements = [
+      db
+        .prepare(`DELETE FROM knowledge_items WHERE session_id = ? AND analysis_id = ?
+          AND (skill_key = '' OR category = '' OR domain = '')`)
+        .bind(sessionId, row.analysisId),
+    ];
+    for (const skill of skills) {
+      const mastery = Math.round(
+        (100 - skill.userMasteryBefore) *
+          (skill.coverage / 100) *
+          (skill.depth / 100) *
+          engagement
+      );
+      statements.push(
+        db
+          .prepare(`INSERT INTO knowledge_items
+            (id, session_id, meeting_id, analysis_id, topic, status, evidence,
+              skill_key, category, domain, skill_type, description, prerequisites_json,
+              mastery_level, confidence, coverage, depth, source_value)
+            VALUES (?, ?, ?, ?, ?, 'exposed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          .bind(
+            crypto.randomUUID(),
+            sessionId,
+            row.meetingId,
+            row.analysisId,
+            skill.name,
+            skill.evidence.join("；"),
+            skill.key,
+            skill.category,
+            skill.domain,
+            skill.type,
+            skill.description,
+            JSON.stringify(skill.prerequisites),
+            mastery,
+            skill.confidence,
+            skill.coverage,
+            skill.depth,
+            result.signals.value
+          )
+      );
+    }
+    await db.batch(statements);
+  }
+}
 
 export async function GET(request: Request) {
   const session = await getSession(request);
@@ -16,9 +80,10 @@ export async function GET(request: Request) {
     return json({ view, items: rows.results }, {}, session.cookie);
   }
   if (view === "knowledge") {
+    await repairLegacyKnowledge(db, session.sessionId);
     const rows = await db
       .prepare(`SELECT k.id, k.meeting_id AS meetingId, k.analysis_id AS analysisId,
-        k.topic, k.status, k.evidence, k.skill_key AS skillKey, k.domain,
+        k.topic, k.status, k.evidence, k.skill_key AS skillKey, k.category, k.domain,
         k.skill_type AS skillType, k.description,
         k.prerequisites_json AS prerequisitesJson,
         k.mastery_level AS masteryLevel, k.confidence, k.coverage, k.depth,

@@ -7,6 +7,7 @@ import type {
   XianjianAnalysisResult,
 } from "./types";
 import { skillKey } from "./personalization";
+import { canonicalSkillName, inferSkillTaxonomy } from "./skill-taxonomy";
 
 const DEFAULT_BASE_URL = "https://app.infinisynapse.cn";
 
@@ -135,8 +136,10 @@ ${contentInstruction}
 2. ${segmentRequirement}
 3. ${segmentEvidence}
 4. 执行“专业技能点抽取”，这是硬性要求，不得把视频标题、人物、事件结论或整句摘要直接当技能节点：
-   - 技能点必须是可学习、可练习、可迁移、可验证掌握程度的最小专业单元，例如“用数学归纳法证明递推恒等式”，而不是“某教授证明了某猜想”。
-   - 每个技能点必须明确专业领域、类型、前置技能、内容中可核验的证据、学完后能做什么，以及本内容覆盖深度。
+   - 先确定宽类别 category（如“数学”“计算机科学”），再确定专业领域 domain（如“几何测度论”“调和分析”），最后提取知识或技能节点。
+   - 节点 name 必须是 2-20 字的规范名词短语，例如“挂谷猜想”“豪斯多夫维数”“粘性挂谷集”“多尺度归纳”；不得写成简历句、结论句或“使用某方法完成某事”的长句。
+   - 节点可以是可验证理解的核心概念，也可以是可练习的方法；具体证明结论、人物、年份和事件只放 description/evidence。
+   - 每个节点必须明确类别、专业领域、类型、前置技能、内容中可核验的证据、学完后能做什么，以及本内容覆盖深度。
    - 相邻但不同层级的概念不能混成一个节点；同义词必须归一为稳定 key。
    - 人物、奖项、产品名、新闻事实只能作为证据，不能单独成为 skill。
    - 若内容只有事实介绍而没有可学习的方法或概念，应减少技能点数量并降低 confidence，禁止为了凑数生成节点。
@@ -192,8 +195,9 @@ JSON 必须严格符合以下结构：
     "domainSummary": "这份内容覆盖的专业领域与知识层级",
     "skills": [{
       "key": "规范化稳定键，例如 mathematics-induction-proof",
+      "category": "宽类别，例如 数学",
       "domain": "专业领域，例如 数学/离散数学",
-      "name": "可学习且可验证的具体技能点",
+      "name": "2-20字规范名词短语，例如 挂谷猜想",
       "description": "该技能解决什么问题，边界是什么",
       "type": "concept | method | tool | practice",
       "relation": "new | reinforce | prerequisite | advanced",
@@ -411,9 +415,11 @@ export function normalizeResult(
     .filter((item) => item && typeof item === "object")
     .map((item, index) => {
       const record = item as Record<string, unknown>;
-      const domain = String(record.domain || "未分类").trim().slice(0, 80);
-      const name = String(record.name || "").trim().slice(0, 120);
+      const name = canonicalSkillName(String(record.name || ""));
       if (!name) return null;
+      const inferred = inferSkillTaxonomy(name);
+      const category = String(record.category || inferred.category).trim().slice(0, 40);
+      const domain = String(record.domain || inferred.domain).trim().slice(0, 80);
       const type = ["concept", "method", "tool", "practice"].includes(String(record.type))
         ? String(record.type) as SkillPoint["type"]
         : "concept";
@@ -425,9 +431,10 @@ export function normalizeResult(
         : [];
       const description = String(record.description || "").trim().slice(0, 500);
       const learningOutcome = String(record.learningOutcome || "").trim().slice(0, 500);
-      if (!description || !learningOutcome || !evidence.length || name.length > 80) return null;
+      if (!description || !learningOutcome || !evidence.length) return null;
       return {
-        key: String(record.key || skillKey(domain, name) || `skill-${index + 1}`).slice(0, 160),
+        key: String(record.key || skillKey(`${category}/${domain}`, name) || `skill-${index + 1}`).slice(0, 160),
+        category,
         domain,
         name,
         description,
