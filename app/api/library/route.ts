@@ -9,7 +9,16 @@ async function repairLegacyKnowledge(db: D1Database, sessionId: string) {
       FROM knowledge_items k
       JOIN analyses a ON a.id = k.analysis_id
       JOIN meetings m ON m.id = k.meeting_id
-      WHERE k.session_id = ? AND k.taxonomy_version != 'peek.taxonomy.v2'
+      WHERE k.session_id = ?
+      AND (
+        k.taxonomy_version != 'peek.taxonomy.v3'
+        OR length(k.topic) > 20
+        OR k.topic IN ('数学', '数学史', '几何测度论', '调和分析', '偏微分方程')
+        OR k.topic LIKE '%是否%'
+        OR k.topic LIKE '%将%'
+        OR k.topic LIKE '%中的%'
+        OR k.topic LIKE '%挂谷集猜想%'
+      )
       AND a.result_json IS NOT NULL
       LIMIT 20`)
     .bind(sessionId)
@@ -21,8 +30,7 @@ async function repairLegacyKnowledge(db: D1Database, sessionId: string) {
     const engagement = row.state === "completed" ? 0.45 : 0.18;
     const statements = [
       db
-        .prepare(`DELETE FROM knowledge_items WHERE session_id = ? AND analysis_id = ?
-          AND taxonomy_version != 'peek.taxonomy.v2'`)
+        .prepare("DELETE FROM knowledge_items WHERE session_id = ? AND analysis_id = ?")
         .bind(sessionId, row.analysisId),
     ];
     for (const skill of skills) {
@@ -38,7 +46,7 @@ async function repairLegacyKnowledge(db: D1Database, sessionId: string) {
             (id, session_id, meeting_id, analysis_id, topic, status, evidence,
               skill_key, category, domain, skill_type, description, prerequisites_json,
               mastery_level, confidence, coverage, depth, source_value, taxonomy_version)
-            VALUES (?, ?, ?, ?, ?, 'exposed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'peek.taxonomy.v2')`)
+            VALUES (?, ?, ?, ?, ?, 'exposed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'peek.taxonomy.v3')`)
           .bind(
             crypto.randomUUID(),
             sessionId,
