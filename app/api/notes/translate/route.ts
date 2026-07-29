@@ -71,12 +71,11 @@ export async function POST(request: Request) {
       sourceText,
     })));
     const translatedChunks = translations.map((translation) => translation.answer.answer.trim());
-    const invalidChunk = translatedChunks.some((content, index) => {
-      const sourceHeadingCount = chunks[index].match(/^#{1,4}\s+.+$/gm)?.length || 0;
-      const translatedHeadingCount = content.match(/^#{1,4}\s+.+$/gm)?.length || 0;
+    const invalidChunk = translatedChunks.some((content) => {
+      const cjkCount = content.match(/[\u3400-\u9fff]/g)?.length || 0;
       return content.length < 40 ||
         /\b(?:let me|i need to|the user wants|i should|i will)\b/i.test(content) ||
-        (sourceHeadingCount > 0 && translatedHeadingCount < sourceHeadingCount);
+        cjkCount / content.length > 0.2;
     });
     if (invalidChunk) {
       return json({ error: "英文笔记没有完整生成，请重试" }, { status: 502 }, session.cookie);
