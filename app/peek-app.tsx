@@ -272,6 +272,27 @@ function PeekMark({ compact = false }: { compact?: boolean }) {
   return <span className={`peek-mark${compact ? " compact" : ""}`} aria-hidden="true"><i /></span>;
 }
 
+function accountDisplayName(status: AuthStatus, language: Language) {
+  const isPlaceholder = (value?: string | null) => {
+    const normalized = value?.trim() || "";
+    return !normalized || /好名字.*朋友.*记住|请输入.*名字|设置.*昵称|your friends.*remember|set.*nickname/i.test(normalized);
+  };
+  const candidates = [status.user?.nickname, status.user?.username, status.user?.email];
+  const visible = candidates.find((value) => !isPlaceholder(value));
+  return visible?.trim() || (status.authenticated
+    ? (language === "zh" ? "InfiniSynapse 用户" : "InfiniSynapse user")
+    : (language === "zh" ? "访客" : "Guest"));
+}
+
+function accountSecondaryText(status: AuthStatus, language: Language) {
+  if (!status.authenticated) return language === "zh" ? "登录可跨设备同步" : "Sign in to sync";
+  const name = accountDisplayName(status, language);
+  const detail = [status.user?.email, status.user?.username]
+    .map((value) => value?.trim())
+    .find((value) => value && value !== name && !/好名字.*朋友.*记住/.test(value));
+  return detail || (language === "zh" ? "已同步学习空间" : "Workspace synced");
+}
+
 function NavIcon({ kind }: { kind: "home" | "tasks" | "later" | "history" | "notes" | "skills" }) {
   const paths = {
     home: <><rect x="4" y="4" width="6" height="6" rx="1" /><rect x="14" y="4" width="6" height="6" rx="1" /><rect x="4" y="14" width="6" height="6" rx="1" /><rect x="14" y="14" width="6" height="6" rx="1" /></>,
@@ -291,6 +312,7 @@ export default function PeekApp() {
   const [languageOpen, setLanguageOpen] = useState(false);
   const [fontSize, setFontSize] = useState<"small" | "medium" | "large">("medium");
   const [query, setQuery] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
   const [meetings, setMeetings] = useState<MeetingItem[]>([]);
   const [knowledge, setKnowledge] = useState<Record<string, unknown>[]>([]);
   const [notes, setNotes] = useState<NoteItem[]>([]);
@@ -325,6 +347,17 @@ export default function PeekApp() {
     document.documentElement.dataset.fontSize = fontSize;
     window.localStorage.setItem("peek-font-size", fontSize);
   }, [fontSize]);
+  useEffect(() => {
+    const handleSearchShortcut = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setSearchOpen(true);
+        window.setTimeout(() => document.getElementById("peek-global-search")?.focus(), 0);
+      }
+    };
+    window.addEventListener("keydown", handleSearchShortcut);
+    return () => window.removeEventListener("keydown", handleSearchShortcut);
+  }, []);
 
   const notify = useCallback((message: string) => {
     setToast(message);
@@ -655,6 +688,33 @@ export default function PeekApp() {
     if (!normalized) return meetings;
     return meetings.filter((item) => `${item.title} ${item.source} ${item.result?.summary || ""}`.toLowerCase().includes(normalized));
   }, [meetings, query]);
+  const searchResults = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    if (!normalized) return [];
+    return meetings
+      .filter((item) => {
+        const result = item.result;
+        const searchable = [
+          item.title,
+          item.source,
+          result?.summary,
+          result?.signals?.valueReason,
+          ...(result?.segments || []).flatMap((segment) => [segment.title, segment.value, segment.evidence, ...(segment.tags || [])]),
+          ...(result?.newKnowledge || []).flatMap((item) => [item.topic, item.evidence]),
+          ...(result?.repeatedKnowledge || []).flatMap((item) => [item.topic, item.evidence]),
+          ...notes.filter((note) => note.meetingId === item.id).map((note) => note.content),
+        ].filter(Boolean).join(" ").toLowerCase();
+        return searchable.includes(normalized);
+      })
+      .slice(0, 8);
+  }, [meetings, notes, query]);
+
+  const openSearchResult = useCallback((item: MeetingItem) => {
+    setSearchOpen(false);
+    setQuery("");
+    if (item.analysisId) void openAnalysis(item.analysisId);
+    else navigate("history");
+  }, [navigate, meetings]);
   const shelfMeetings = visibleMeetings.filter((item) => isOnShelf(item.state));
   const savedTotal = meetings.reduce((total, item) => total + (item.result?.savedSeconds || 0), 0);
   const worthCount = meetings.filter((item) => item.result?.verdict === "worth").length;
@@ -728,8 +788,8 @@ export default function PeekApp() {
           <button className="profile-identity-button" onClick={() => navigate("settings")} aria-label={t.settings}>
             {authStatus.authenticated && authStatus.user?.avatar
               ? <img src={authStatus.user.avatar} alt="" referrerPolicy="no-referrer" />
-              : <span>{authStatus.authenticated ? (authStatus.user?.nickname || authStatus.user?.email || "P").slice(0, 1).toUpperCase() : (language === "zh" ? "访" : "G")}</span>}
-            <div><strong>{authStatus.authenticated ? (authStatus.user?.nickname || authStatus.user?.email || (language === "zh" ? "已登录用户" : "Signed-in user")) : (language === "zh" ? "访客" : "Guest")}</strong><small>{authStatus.authenticated ? (language === "zh" ? "已同步学习空间" : "Workspace synced") : (language === "zh" ? "登录可跨设备同步" : "Sign in to sync")}</small></div>
+              : <span>{accountDisplayName(authStatus, language).slice(0, 1).toUpperCase()}</span>}
+            <div><strong>{accountDisplayName(authStatus, language)}</strong><small>{accountSecondaryText(authStatus, language)}</small></div>
           </button>
           <button className="settings-trigger" onClick={() => navigate("settings")} aria-label={t.settings} title={t.settings}>•••</button>
         </div>
@@ -739,11 +799,40 @@ export default function PeekApp() {
         <header className="topbar">
           <div className="crumb"><span>{view === "detail" ? (language === "zh" ? "探索" : "Explore") : t.workspace}</span><i>／</i><b>{pageName}</b></div>
           <div className="top-actions">
-            <label className="search-button">
-              <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></svg>
-              <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t.search} />
-              <kbd>⌘ K</kbd>
-            </label>
+            <div className={`global-search ${searchOpen ? "open" : ""}`}>
+              <button className="mobile-search-trigger" onClick={() => { setSearchOpen(true); window.setTimeout(() => document.getElementById("peek-global-search")?.focus(), 0); }} aria-label={t.search}>
+                <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></svg>
+              </button>
+              <label className="search-button">
+                <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></svg>
+                <input
+                  id="peek-global-search"
+                  value={query}
+                  onFocus={() => setSearchOpen(true)}
+                  onChange={(event) => { setQuery(event.target.value); setSearchOpen(true); }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && searchResults[0]) openSearchResult(searchResults[0]);
+                    if (event.key === "Escape") { setQuery(""); setSearchOpen(false); event.currentTarget.blur(); }
+                  }}
+                  placeholder={t.search}
+                  autoComplete="off"
+                />
+                <kbd>⌘ K</kbd>
+              </label>
+              {searchOpen && (
+                <div className="search-popover">
+                  <div className="search-popover-head"><strong>{language === "zh" ? "搜索学习库" : "Search library"}</strong><button onClick={() => { setSearchOpen(false); setQuery(""); }} aria-label={language === "zh" ? "关闭搜索" : "Close search"}>×</button></div>
+                  {!query.trim() ? <p>{language === "zh" ? "输入标题、来源、知识点或笔记关键词" : "Search titles, sources, knowledge or note keywords"}</p>
+                    : searchResults.length ? searchResults.map((item) => (
+                      <button className="search-result" key={item.id} onClick={() => openSearchResult(item)}>
+                        <span>{contentTypeLabel(item.contentType || "video", language)}</span>
+                        <div><strong>{item.title}</strong><small>{item.source} · {item.noteCount || 0} {language === "zh" ? "条笔记" : "notes"}</small></div>
+                        <i>→</i>
+                      </button>
+                    )) : <p>{language === "zh" ? `没有找到“${query.trim()}”` : `No results for “${query.trim()}”`}</p>}
+                </div>
+              )}
+            </div>
             <div className="language-wrap">
               <button className="language" onClick={() => setLanguageOpen((open) => !open)}><span>文A</span><b>{language === "zh" ? "中文" : "English"}</b><i>⌄</i></button>
               {languageOpen && (
@@ -772,7 +861,7 @@ export default function PeekApp() {
                 </div>
               )}
             </div>
-            <button className="infini-connect" onClick={() => setShowConnect(true)} title={authStatus.authenticated ? (language === "zh" ? "管理账号" : "Manage account") : (language === "zh" ? "登录或以访客使用" : "Sign in or continue as guest")}><span>◌</span><b>{authStatus.authenticated ? (authStatus.user?.nickname || authStatus.user?.email || (language === "zh" ? "已登录" : "Signed in")) : (language === "zh" ? "登录" : "Sign in")}</b></button>
+            <button className="infini-connect" onClick={() => setShowConnect(true)} title={authStatus.authenticated ? (language === "zh" ? "管理账号" : "Manage account") : (language === "zh" ? "登录或以访客使用" : "Sign in or continue as guest")}><span>◌</span><b>{authStatus.authenticated ? accountDisplayName(authStatus, language) : (language === "zh" ? "登录" : "Sign in")}</b></button>
             <button className="primary-button add-content-button" onClick={() => { setShowAdd(true); setTaskListOpen(false); notify(language === "zh" ? "已打开内容分析窗口" : "Analysis form opened"); }}>＋ {t.add}</button>
           </div>
         </header>
@@ -813,7 +902,7 @@ export default function PeekApp() {
           <HistoryView language={language} items={visibleMeetings} savedTotal={savedTotal} onOpen={openAnalysis} />
         )}
         {view === "notes" && (
-          <NotesView language={language} items={notes} onChanged={loadNotes} />
+          <NotesView language={language} items={notes} meetings={meetings} onChanged={loadNotes} />
         )}
         {view === "skills" && (
           <SkillsView language={language} knowledge={knowledge} onOpen={() => {
@@ -831,6 +920,8 @@ export default function PeekApp() {
             autoAnalyzeDiscoveries={workspaceSettings.autoAnalyzeDiscoveries}
             titleMode={workspaceSettings.titleMode}
             authStatus={authStatus}
+            fontSize={fontSize}
+            onFontSizeChange={setFontSize}
             onAutoCreateNoteChange={updateAutoCreateNote}
             onTitleModeChange={updateTitleMode}
             onDiscoverySettingsChange={updateDiscoverySettings}
@@ -1063,12 +1154,12 @@ function RichNote({ content }: { content: string }) {
   return <div className="rich-note">{blocks}</div>;
 }
 
-function NotesView({ language, items, onChanged }: { language: Language; items: NoteItem[]; onChanged: () => Promise<void> }) {
+function NotesView({ language, items, meetings, onChanged }: { language: Language; items: NoteItem[]; meetings: MeetingItem[]; onChanged: () => Promise<void> }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [rebuildBusy, setRebuildBusy] = useState(false);
-  const [openMeetingId, setOpenMeetingId] = useState<string | null>(items[0]?.meetingId || null);
+  const [openMeetingId, setOpenMeetingId] = useState<string | null>(null);
   const [noteLanguage, setNoteLanguage] = useState<Language>("zh");
   const [translatedNotes, setTranslatedNotes] = useState<Record<string, Record<string, string>>>({});
   const [translationBusy, setTranslationBusy] = useState(false);
@@ -1078,18 +1169,24 @@ function NotesView({ language, items, onChanged }: { language: Language; items: 
   const [notebookAskBusy, setNotebookAskBusy] = useState(false);
   const [notebookAskError, setNotebookAskError] = useState("");
   const groups = useMemo(() => {
-    const map = new Map<string, { meetingId: string; title: string; items: NoteItem[]; updatedAt: string }>();
+    const meetingMap = new Map(meetings.map((meeting) => [meeting.id, meeting]));
+    const map = new Map<string, { meetingId: string; title: string; items: NoteItem[]; updatedAt: string; contentType: ContentType; source: string }>();
     for (const item of items) {
-      const group = map.get(item.meetingId) || { meetingId: item.meetingId, title: item.title, items: [], updatedAt: item.updatedAt || item.createdAt };
+      const meeting = meetingMap.get(item.meetingId);
+      const group = map.get(item.meetingId) || {
+        meetingId: item.meetingId,
+        title: item.title,
+        items: [],
+        updatedAt: item.updatedAt || item.createdAt,
+        contentType: meeting?.contentType || "video",
+        source: meeting?.source || "",
+      };
       group.items.push(item);
       if ((item.updatedAt || item.createdAt) > group.updatedAt) group.updatedAt = item.updatedAt || item.createdAt;
       map.set(item.meetingId, group);
     }
     return [...map.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-  }, [items]);
-  useEffect(() => {
-    if (!openMeetingId && groups.length) setOpenMeetingId(groups[0].meetingId);
-  }, [groups, openMeetingId]);
+  }, [items, meetings]);
 
   const translateNotebook = async (meetingId: string) => {
     if (translatedNotes[meetingId]) return;
@@ -1207,7 +1304,7 @@ function NotesView({ language, items, onChanged }: { language: Language; items: 
 
   return (
     <section className="page page-view notes-page">
-      <div className="page-title"><div><span className="eyebrow">TIMESTAMP NOTEBOOK</span><h1>{copy[language].notes}</h1><p>{language === "zh" ? "所有在分析片段下写过的时间码笔记，都集中保存在这里。" : "Every timestamp note written under an analyzed segment is collected here."}</p></div><div className="saved-pill"><span>{language === "zh" ? "笔记总数" : "TOTAL NOTES"}</span><strong>{items.length}</strong></div></div>
+      <div className="page-title"><div><span className="eyebrow">TIMESTAMP NOTEBOOK</span><h1>{copy[language].notes}</h1><p>{language === "zh" ? "最外层是一条视频、文章或论文；点击后再展开它的总结、批注和问答。" : "Each video, article or paper is a notebook. Open one to see its summary, annotations and Q&A."}</p></div><div className="saved-pill"><span>{language === "zh" ? "内容笔记本" : "NOTEBOOKS"}</span><strong>{groups.length}</strong></div></div>
       <article className="content-panel notes-panel notebook-library">
         <div className="section-head border-bottom"><div><h2>{language === "zh" ? "我的笔记本" : "My notebook"}</h2><p>{language === "zh" ? "正文、边栏批注和随时问答都按内容收在一起" : "Notes, annotations and Q&A stay together by item"}</p></div><div className="notebook-toolbar"><div className="note-language-switch" role="group" aria-label={language === "zh" ? "笔记语言" : "Note language"}><button className={noteLanguage === "zh" ? "active" : ""} disabled={translationBusy} onClick={() => void switchNoteLanguage("zh")}>中文</button><button className={noteLanguage === "en" ? "active" : ""} disabled={translationBusy || !openMeetingId} onClick={() => void switchNoteLanguage("en")}>{translationBusy ? (language === "zh" ? "转换中…" : "Translating…") : "English"}</button></div><button className="outline-button export-notes" disabled={!openMeetingId || rebuildBusy || noteLanguage !== "zh"} onClick={async () => { if (!openMeetingId) return; setRebuildBusy(true); try { await api("/api/notes/rebuild", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ meetingId: openMeetingId }) }); setTranslatedNotes((current) => { const next = { ...current }; delete next[openMeetingId]; return next; }); await onChanged(); } finally { setRebuildBusy(false); } }}>{rebuildBusy ? (language === "zh" ? "整理中…" : "Rebuilding…") : (language === "zh" ? "重新整理笔记" : "Reorganize notes")}</button><button className="outline-button export-notes" disabled={!items.length} onClick={exportNotebook}>{language === "zh" ? "导出笔记" : "Export notes"}</button></div></div>
         {translationError && <div className="notebook-language-error">{translationError}</div>}
@@ -1217,7 +1314,7 @@ function NotesView({ language, items, onChanged }: { language: Language; items: 
             const open = openMeetingId === group.meetingId;
             const summary = group.items.find((item) => item.segmentId?.startsWith("analysis-summary:")) || group.items[0];
             const translated = translatedNotes[group.meetingId] || {};
-            return <article className={`notebook-document ${open ? "open" : ""}`} key={group.meetingId}><button className="notebook-cover" onClick={() => { const next = open ? null : group.meetingId; setOpenMeetingId(next); setNotebookAnswer(null); setNotebookAskError(""); if (next && noteLanguage === "en") void translateNotebook(next); }}><span className="notebook-icon">▤</span><div><strong>{group.title}</strong><small>{group.items.length} {language === "zh" ? "条笔记" : "notes"} · {new Date(group.updatedAt).toLocaleDateString(language === "zh" ? "zh-CN" : "en-US")}</small><p>{summary.content.replace(/^#+.*$/gm, "").replace(/\*\*/g, "").trim().slice(0, 120)}</p></div><i>{open ? "−" : "+"}</i></button>{open && <div className="notebook-pages"><aside className="notebook-margin"><span>{language === "zh" ? "边栏批注" : "MARGIN NOTES"}</span>{group.items.filter((item) => item.timecodeSeconds != null).map((item) => <button key={item.id} onClick={() => document.getElementById(`note-${item.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" })}>{timecode(item.timecodeSeconds || 0)}</button>)}</aside><div className="note-list grouped">{group.items.map((item) => { const visibleContent = noteLanguage === "en" ? translated[item.id] || item.content : item.content; return <article className={`note-entry ${item.segmentId?.startsWith("analysis-summary:") ? "summary-note" : ""}`} id={`note-${item.id}`} key={item.id}><div className="note-time">{item.timecodeSeconds == null ? (item.segmentId?.startsWith("analysis-summary:") ? (noteLanguage === "zh" ? "总" : "MAIN") : "—") : timecode(item.timecodeSeconds)}</div><div className="note-body">{editingId === item.id ? <textarea value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={4000} autoFocus /> : <RichNote content={visibleContent} />}<small>{new Date(item.updatedAt || item.createdAt).toLocaleString(language === "zh" ? "zh-CN" : "en-US", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}</small></div>{noteLanguage === "zh" && <div className="note-actions">{editingId === item.id ? <><button disabled={busyId === item.id || !draft.trim()} onClick={() => save(item)}>{language === "zh" ? "保存" : "Save"}</button><button className="ghost-action" onClick={() => setEditingId(null)}>{language === "zh" ? "取消" : "Cancel"}</button></> : <><button onClick={() => { setEditingId(item.id); setDraft(item.content); }}>{language === "zh" ? "编辑" : "Edit"}</button><button className="ghost-action danger" disabled={busyId === item.id} onClick={() => remove(item)}>{language === "zh" ? "删除" : "Delete"}</button></>}</div>}</article>; })}</div><aside className="notebook-companion"><img src="/mascot-v2.png" alt="Peek" /><span className="eyebrow">ASK PEEK</span><h3>{noteLanguage === "zh" ? "哪里没看懂，直接问" : "Ask anything about this item"}</h3><p>{noteLanguage === "zh" ? "不用写提示词。Peek 会回到原内容和分析报告里找依据。" : "No prompting skills needed. Peek checks the source and report for evidence."}</p><textarea value={notebookQuestion} onChange={(event) => setNotebookQuestion(event.target.value)} maxLength={800} placeholder={noteLanguage === "zh" ? "例如：这三个要素分别是什么？" : "e.g. What are the three elements?"} /><button className="primary-button" disabled={notebookAskBusy || notebookQuestion.trim().length < 2} onClick={askNotebook}>{notebookAskBusy ? (noteLanguage === "zh" ? "Peek 正在查找…" : "Peek is checking…") : (noteLanguage === "zh" ? "问 Peek" : "Ask Peek")}</button>{notebookAskError && <div className="qa-error">{notebookAskError}</div>}{notebookAnswer && <div className="notebook-answer"><RichNote content={notebookAnswer.answer} /><button onClick={async () => { await api("/api/notes", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ meetingId: group.meetingId, segmentId: `qa:${Date.now()}`, content: notebookAnswer.note }) }); setNoteLanguage("zh"); setTranslatedNotes((current) => { const next = { ...current }; delete next[group.meetingId]; return next; }); await onChanged(); }}>{noteLanguage === "zh" ? "＋ 加入这篇笔记" : "+ Add to notebook"}</button></div>}</aside></div>}</article>;
+            return <article className={`notebook-document ${open ? "open" : ""}`} key={group.meetingId}><button className="notebook-cover" aria-expanded={open} onClick={() => { const next = open ? null : group.meetingId; setOpenMeetingId(next); setNotebookAnswer(null); setNotebookAskError(""); if (next && noteLanguage === "en") void translateNotebook(next); }}><span className={`notebook-icon ${group.contentType}`}>{group.contentType === "video" ? "▶" : group.contentType === "paper" ? "§" : "¶"}</span><div><span className="notebook-content-type">{contentTypeLabel(group.contentType, language)}{group.source ? ` · ${group.source}` : ""}</span><strong>{group.title}</strong><small>{group.items.length} {language === "zh" ? "条笔记" : "notes"} · {new Date(group.updatedAt).toLocaleDateString(language === "zh" ? "zh-CN" : "en-US")}</small><p>{summary.content.replace(/^#+.*$/gm, "").replace(/\*\*/g, "").trim().slice(0, 120)}</p></div><i>{open ? (language === "zh" ? "收起 −" : "Close −") : (language === "zh" ? "打开 +" : "Open +")}</i></button>{open && <div className="notebook-pages"><aside className="notebook-margin"><span>{language === "zh" ? "边栏批注" : "MARGIN NOTES"}</span>{group.items.filter((item) => item.timecodeSeconds != null).map((item) => <button key={item.id} onClick={() => document.getElementById(`note-${item.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" })}>{timecode(item.timecodeSeconds || 0)}</button>)}</aside><div className="note-list grouped">{group.items.map((item) => { const visibleContent = noteLanguage === "en" ? translated[item.id] || item.content : item.content; return <article className={`note-entry ${item.segmentId?.startsWith("analysis-summary:") ? "summary-note" : ""}`} id={`note-${item.id}`} key={item.id}><div className="note-time">{item.timecodeSeconds == null ? (item.segmentId?.startsWith("analysis-summary:") ? (noteLanguage === "zh" ? "总" : "MAIN") : "—") : timecode(item.timecodeSeconds)}</div><div className="note-body">{editingId === item.id ? <textarea value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={4000} autoFocus /> : <RichNote content={visibleContent} />}<small>{new Date(item.updatedAt || item.createdAt).toLocaleString(language === "zh" ? "zh-CN" : "en-US", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}</small></div>{noteLanguage === "zh" && <div className="note-actions">{editingId === item.id ? <><button disabled={busyId === item.id || !draft.trim()} onClick={() => save(item)}>{language === "zh" ? "保存" : "Save"}</button><button className="ghost-action" onClick={() => setEditingId(null)}>{language === "zh" ? "取消" : "Cancel"}</button></> : <><button onClick={() => { setEditingId(item.id); setDraft(item.content); }}>{language === "zh" ? "编辑" : "Edit"}</button><button className="ghost-action danger" disabled={busyId === item.id} onClick={() => remove(item)}>{language === "zh" ? "删除" : "Delete"}</button></>}</div>}</article>; })}</div><aside className="notebook-companion"><img src="/mascot-v2.png" alt="Peek" /><span className="eyebrow">ASK PEEK</span><h3>{noteLanguage === "zh" ? "哪里没看懂，直接问" : "Ask anything about this item"}</h3><p>{noteLanguage === "zh" ? "不用写提示词。Peek 会回到原内容和分析报告里找依据。" : "No prompting skills needed. Peek checks the source and report for evidence."}</p><textarea value={notebookQuestion} onChange={(event) => setNotebookQuestion(event.target.value)} maxLength={800} placeholder={noteLanguage === "zh" ? "例如：这三个要素分别是什么？" : "e.g. What are the three elements?"} /><button className="primary-button" disabled={notebookAskBusy || notebookQuestion.trim().length < 2} onClick={askNotebook}>{notebookAskBusy ? (noteLanguage === "zh" ? "Peek 正在查找…" : "Peek is checking…") : (noteLanguage === "zh" ? "问 Peek" : "Ask Peek")}</button>{notebookAskError && <div className="qa-error">{notebookAskError}</div>}{notebookAnswer && <div className="notebook-answer"><RichNote content={notebookAnswer.answer} /><button onClick={async () => { await api("/api/notes", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ meetingId: group.meetingId, segmentId: `qa:${Date.now()}`, content: notebookAnswer.note }) }); setNoteLanguage("zh"); setTranslatedNotes((current) => { const next = { ...current }; delete next[group.meetingId]; return next; }); await onChanged(); }}>{noteLanguage === "zh" ? "＋ 加入这篇笔记" : "+ Add to notebook"}</button></div>}</aside></div>}</article>;
           })}
         </div>
       </article>
@@ -1347,6 +1444,8 @@ function SettingsView({
   autoAnalyzeDiscoveries,
   titleMode,
   authStatus,
+  fontSize,
+  onFontSizeChange,
   onAutoCreateNoteChange,
   onTitleModeChange,
   onDiscoverySettingsChange,
@@ -1360,6 +1459,8 @@ function SettingsView({
   autoAnalyzeDiscoveries: boolean;
   titleMode: WorkspaceSettings["titleMode"];
   authStatus: AuthStatus;
+  fontSize: "small" | "medium" | "large";
+  onFontSizeChange: (size: "small" | "medium" | "large") => void;
   onAutoCreateNoteChange: (autoCreateNote: boolean) => Promise<void>;
   onTitleModeChange: (titleMode: WorkspaceSettings["titleMode"]) => Promise<void>;
   onDiscoverySettingsChange: (next: Partial<Pick<WorkspaceSettings, "autoDiscoverVideos" | "autoAnalyzeDiscoveries">>) => Promise<void>;
@@ -1370,7 +1471,8 @@ function SettingsView({
   const [titleBusy, setTitleBusy] = useState(false);
   const [discoveryBusy, setDiscoveryBusy] = useState(false);
   const [error, setError] = useState("");
-  const accountName = authStatus.user?.nickname || authStatus.user?.email || authStatus.user?.username;
+  const accountName = accountDisplayName(authStatus, language);
+  const accountDetail = accountSecondaryText(authStatus, language);
 
   return (
     <section className="page page-view settings-page">
@@ -1384,13 +1486,31 @@ function SettingsView({
 
       <div className="settings-grid">
         <article className="settings-panel account-settings-panel">
-          <div className="settings-panel-head"><span className="settings-icon">{authStatus.authenticated ? "✓" : "匿"}</span><div><h2>{language === "zh" ? "账号与个人信息" : "Account & personal information"}</h2><p>{authStatus.authenticated ? (language === "zh" ? "学习空间已绑定，可在其他设备登录后恢复。" : "Your workspace is linked and can be restored on other devices.") : (language === "zh" ? "当前以访客身份使用；登录完全可选。" : "You are using guest mode. Sign-in is completely optional.")}</p></div></div>
-          <div className="account-settings-list"><div><span>{language === "zh" ? "使用身份" : "Identity"}</span><strong>{accountName || (language === "zh" ? "访客" : "Guest")}</strong></div><div><span>{language === "zh" ? "学习画像" : "Learning profile"}</span><strong>{language === "zh" ? `${knowledgeCount} 个知识节点` : `${knowledgeCount} knowledge nodes`}</strong></div><div><span>{language === "zh" ? "画像来源" : "Profile source"}</span><strong>{language === "zh" ? "由纳入书架的内容自动累计" : "Built automatically from shelved content"}</strong></div></div>
-          <button className="outline-button account-manage-button" onClick={onManageAccount}>{authStatus.authenticated ? (language === "zh" ? "管理账号" : "Manage account") : (language === "zh" ? "登录并同步" : "Sign in & sync")}</button>
+          <div className="settings-account-hero">
+            {authStatus.authenticated && authStatus.user?.avatar
+              ? <img src={authStatus.user.avatar} alt="" referrerPolicy="no-referrer" />
+              : <span className="settings-account-avatar">{accountName.slice(0, 1).toUpperCase()}</span>}
+            <div><span className={`account-state ${authStatus.authenticated ? "connected" : ""}`}>{authStatus.authenticated ? (language === "zh" ? "InfiniSynapse 已连接" : "InfiniSynapse connected") : (language === "zh" ? "访客模式" : "Guest mode")}</span><h2>{accountName}</h2><p>{accountDetail}</p></div>
+            <button className="outline-button account-manage-button" onClick={onManageAccount}>{authStatus.authenticated ? (language === "zh" ? "管理账号" : "Manage account") : (language === "zh" ? "登录并同步" : "Sign in & sync")}</button>
+          </div>
+          <div className="account-settings-list"><div><span>{language === "zh" ? "登录状态" : "Status"}</span><strong>{authStatus.authenticated ? (language === "zh" ? "已登录并同步" : "Signed in and synced") : (language === "zh" ? "未登录，本机可用" : "Not signed in; local use")}</strong></div><div><span>{language === "zh" ? "学习画像" : "Learning profile"}</span><strong>{language === "zh" ? `${knowledgeCount} 个知识节点` : `${knowledgeCount} knowledge nodes`}</strong></div><div><span>{language === "zh" ? "画像更新方式" : "Profile updates"}</span><strong>{language === "zh" ? "由纳入书架的内容自动累计更新" : "Updates from shelved content"}</strong></div></div>
+        </article>
+
+        <article className="settings-panel display-settings-panel">
+          <div className="settings-panel-head"><span className="settings-icon">A</span><div><h2>{language === "zh" ? "显示与字号" : "Display & text size"}</h2><p>{language === "zh" ? "字号会应用到整个网站，并自动适配卡片和移动端排版。" : "Text size applies across the site and adapts cards and mobile layouts."}</p></div></div>
+          <div className="settings-font-options" role="group" aria-label={language === "zh" ? "网站字号" : "Website text size"}>
+            {(["small", "medium", "large"] as const).map((size, index) => (
+              <button type="button" key={size} className={fontSize === size ? "active" : ""} onClick={() => onFontSizeChange(size)}>
+                <span className={`font-sample sample-${size}`}>Aa</span>
+                <strong>{language === "zh" ? ["紧凑", "标准", "舒适"][index] : ["Compact", "Standard", "Comfortable"][index]}</strong>
+                <small>{language === "zh" ? ["适合信息密集页面", "推荐的默认显示", "更大、更易阅读"][index] : ["More on screen", "Recommended default", "Larger and easier to read"][index]}</small>
+              </button>
+            ))}
+          </div>
         </article>
 
         <article className="settings-panel">
-          <div className="settings-panel-head"><span className="settings-icon">Aa</span><div><h2>{language === "zh" ? "链接标题" : "Link titles"}</h2><p>{language === "zh" ? "决定标题留空时采用原内容标题，还是继续使用域名加内容类型。" : "Choose how untitled links are named."}</p></div></div>
+          <div className="settings-panel-head"><span className="settings-icon">⌁</span><div><h2>{language === "zh" ? "链接标题" : "Link titles"}</h2><p>{language === "zh" ? "决定标题留空时采用原内容标题，还是继续使用域名加内容类型。" : "Choose how untitled links are named."}</p></div></div>
           <div className="title-mode-control" role="group" aria-label={language === "zh" ? "标题生成方式" : "Title mode"}>
             <button type="button" className={titleMode === "automatic" ? "active" : ""} disabled={titleBusy} onClick={async () => { setTitleBusy(true); try { await onTitleModeChange("automatic"); } finally { setTitleBusy(false); } }}><strong>{language === "zh" ? "自动生成内容标题" : "Use content title"}</strong><span>{language === "zh" ? "分析后采用来源中的正式标题" : "Use the verified title after analysis"}</span></button>
             <button type="button" className={titleMode === "source" ? "active" : ""} disabled={titleBusy} onClick={async () => { setTitleBusy(true); try { await onTitleModeChange("source"); } finally { setTitleBusy(false); } }}><strong>{language === "zh" ? "沿用当前方式" : "Keep current naming"}</strong><span>{language === "zh" ? "使用域名加视频、文章或论文" : "Use domain plus content type"}</span></button>
@@ -1408,7 +1528,7 @@ function SettingsView({
         </article>
 
         <article className="settings-panel discovery-settings-panel">
-          <div className="settings-panel-head"><span className="settings-icon">⌁</span><div><h2>{language === "zh" ? "自动发现" : "Automatic discovery"}</h2><p>{language === "zh" ? "根据已入架主题检索全网公开视频，每天最多生成 1 条候选推荐。" : "Search the public web from shelved topics and create at most one candidate per day."}</p></div></div>
+          <div className="settings-panel-head"><span className="settings-icon">⌕</span><div><h2>{language === "zh" ? "自动发现" : "Automatic discovery"}</h2><p>{language === "zh" ? "根据已入架主题检索全网公开视频，每天最多生成 1 条候选推荐。" : "Search the public web from shelved topics and create at most one candidate per day."}</p></div></div>
           <label className="setting-toggle">
             <div><strong>{language === "zh" ? "自动发现候选视频" : "Discover candidate videos"}</strong><p>{language === "zh" ? "默认关闭；开启后由后台定时检索，候选不会自动进入书架。" : "Off by default. Background searches never add candidates to your shelf."}</p></div>
             <input type="checkbox" checked={autoDiscoverVideos} disabled={discoveryBusy} onChange={async (event) => { setDiscoveryBusy(true); try { await onDiscoverySettingsChange({ autoDiscoverVideos: event.target.checked, ...(event.target.checked ? {} : { autoAnalyzeDiscoveries: false }) }); } catch (caught) { setError(caught instanceof Error ? caught.message : (language === "zh" ? "自动发现设置保存失败" : "Could not save discovery settings.")); } finally { setDiscoveryBusy(false); } }} />
@@ -1433,6 +1553,7 @@ function SettingsView({
 
       </div>
 
+      {error && <div className="settings-error">{error}</div>}
       <article className="settings-panel settings-footnote">
         <div><span className="eyebrow">PRIVACY</span><h2>{language === "zh" ? "访客可用，登录可选" : "Guest-ready, optional sign-in"}</h2></div>
         <p>{language === "zh" ? "不登录也可以完整使用。Peek 不保存视频或原文副本，只保留分析结果和你主动写下的笔记。" : "Everything works without sign-in. Peek stores results and your notes, not copies of source videos or text."}</p>

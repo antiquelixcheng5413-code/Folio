@@ -16,6 +16,14 @@ export type AuthStatus = {
   } | null;
 };
 
+function visibleAccountName(status: AuthStatus, language: Language) {
+  const placeholder = /好名字.*朋友.*记住|请输入.*名字|设置.*昵称|your friends.*remember|set.*nickname/i;
+  const value = [status.user?.nickname, status.user?.username, status.user?.email]
+    .map((candidate) => candidate?.trim())
+    .find((candidate) => candidate && !placeholder.test(candidate));
+  return value || (language === "zh" ? "InfiniSynapse 用户" : "InfiniSynapse user");
+}
+
 export function ConnectInfiniModal({
   language,
   status,
@@ -29,7 +37,7 @@ export function ConnectInfiniModal({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const userName = status.user?.nickname || status.user?.email || status.user?.username || "InfiniSynapse 用户";
+  const userName = visibleAccountName(status, language);
 
   const logout = async () => {
     setBusy(true);
